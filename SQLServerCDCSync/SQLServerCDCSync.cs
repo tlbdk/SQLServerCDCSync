@@ -15,8 +15,10 @@ namespace SQLServerCDCSync
             return null;
         }
 
-        //public string 
-
+        public bool GenerateSSISPackage(string filename, string conn, string[] tables)
+        {
+            return false;
+        }
 
     }
 }
