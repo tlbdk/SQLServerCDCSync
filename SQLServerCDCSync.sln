@@ -7,20 +7,33 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SQLServerCDCSync", "SQLServ
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SQLServerCDCSync.Tests", "SQLServerCDCSync.Tests\SQLServerCDCSync.Tests.csproj", "{EF1AC20F-0CF0-4A48-B696-D0C52534F61D}"
 EndProject
+Project("{159641D6-6404-4A2A-AE62-294DE0FE8301}") = "SQLServerCDCSync.SSISSample", "SQLServerCDCSync.SSISSample\SQLServerCDCSync.SSISSample.dtproj", "{418F03D6-1EB6-4017-B4FE-1473B43D2153}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
+		Development|Any CPU = Development|Any CPU
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{6D38D8FE-8DC3-4734-B706-F1F1D6FC800C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{6D38D8FE-8DC3-4734-B706-F1F1D6FC800C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6D38D8FE-8DC3-4734-B706-F1F1D6FC800C}.Development|Any CPU.ActiveCfg = Debug|Any CPU
+		{6D38D8FE-8DC3-4734-B706-F1F1D6FC800C}.Development|Any CPU.Build.0 = Debug|Any CPU
 		{6D38D8FE-8DC3-4734-B706-F1F1D6FC800C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6D38D8FE-8DC3-4734-B706-F1F1D6FC800C}.Release|Any CPU.Build.0 = Release|Any CPU
 		{EF1AC20F-0CF0-4A48-B696-D0C52534F61D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{EF1AC20F-0CF0-4A48-B696-D0C52534F61D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EF1AC20F-0CF0-4A48-B696-D0C52534F61D}.Development|Any CPU.ActiveCfg = Debug|Any CPU
+		{EF1AC20F-0CF0-4A48-B696-D0C52534F61D}.Development|Any CPU.Build.0 = Debug|Any CPU
 		{EF1AC20F-0CF0-4A48-B696-D0C52534F61D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EF1AC20F-0CF0-4A48-B696-D0C52534F61D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{418F03D6-1EB6-4017-B4FE-1473B43D2153}.Debug|Any CPU.ActiveCfg = Development
+		{418F03D6-1EB6-4017-B4FE-1473B43D2153}.Debug|Any CPU.Build.0 = Development
+		{418F03D6-1EB6-4017-B4FE-1473B43D2153}.Development|Any CPU.ActiveCfg = Development
+		{418F03D6-1EB6-4017-B4FE-1473B43D2153}.Development|Any CPU.Build.0 = Development
+		{418F03D6-1EB6-4017-B4FE-1473B43D2153}.Release|Any CPU.ActiveCfg = Development
+		{418F03D6-1EB6-4017-B4FE-1473B43D2153}.Release|Any CPU.Build.0 = Development
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

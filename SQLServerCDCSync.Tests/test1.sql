@@ -1,7 +1,12 @@
 ﻿use master;
-ALTER DATABASE [SQLServerCDCSync] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; 
-DROP DATABASE [SQLServerCDCSync];
-CREATE DATABASE [SQLServerCDCSync];
+
+IF EXISTS(select * from sys.databases where name='SQLServerCDCSync') BEGIN
+	ALTER DATABASE [SQLServerCDCSync] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; 
+	DROP DATABASE [SQLServerCDCSync];
+END
+
+CREATE DATABASE SQLServerCDCSync;
+GO
 
 use SQLServerCDCSync;
 
@@ -23,6 +28,16 @@ EXEC sys.sp_cdc_enable_table
 	@supports_net_changes = 1
 ;
 
+-- Copy table structure to a new database so we can do an intial load
+IF EXISTS(select * from sys.databases where name='SQLServerCDCSyncDestination') BEGIN
+	ALTER DATABASE [SQLServerCDCSyncDestination] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; 
+	DROP DATABASE [SQLServerCDCSyncDestination];
+END
+CREATE DATABASE [SQLServerCDCSyncDestination];
+GO
+SELECT * INTO [SQLServerCDCSyncDestination].[dbo].[Test1] FROM [dbo].[Test1] WHERE 1 = 2;
+
+-- Load test data in to the first database
 declare @TestRowID int;
 
  -- Insert a value and delete it again and insert it again
@@ -30,7 +45,7 @@ INSERT INTO [dbo].[Test1] (FirstName, LastName, TestId) VALUES ('Troels Liebe', 
 SET @TestRowID = CAST(SCOPE_IDENTITY() AS INT);
 DELETE FROM [dbo].[Test1] WHERE ID = @TestRowID;
 SET IDENTITY_INSERT [dbo].[Test1] ON;
-INSERT INTO [dbo].[Test1] (ID, FirstName, LastName, TestId) VALUES (@TestRowID,'Troels Liebe', 'Bentsen', 1);
+INSERT INTO [dbo].[Test1] (ID, FirstName, LastName, TestId) VALUES (@TestRowID, 'Troels Liebe', 'Bentsen', 1);
 SET IDENTITY_INSERT [dbo].[Test1] OFF;
 
 -- Insert a value and delete it again and insert it again within a transaction
@@ -39,6 +54,6 @@ INSERT INTO [dbo].[Test1] (FirstName, LastName, TestId) VALUES ('Troels Liebe', 
 SET @TestRowID = CAST(SCOPE_IDENTITY() AS INT);
 DELETE FROM [dbo].[Test1] WHERE ID = @TestRowID;
 SET IDENTITY_INSERT [dbo].[Test1] ON;
-INSERT INTO [dbo].[Test1] (ID, FirstName, LastName, TestId) VALUES (@TestRowID,'Troels Liebe', 'Bentsen', 2);
+INSERT INTO [dbo].[Test1] (ID, FirstName, LastName, TestId) VALUES (@TestRowID, 'Troels Liebe', 'Bentsen', 2);
 SET IDENTITY_INSERT [dbo].[Test1] OFF;
 COMMIT
