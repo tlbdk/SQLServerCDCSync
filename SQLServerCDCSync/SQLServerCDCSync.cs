@@ -8,10 +8,13 @@ using Microsoft.SqlServer.Dts.Pipeline;
 using Microsoft.SqlServer.Dts.Pipeline.Wrapper;
 using System.Globalization;
 using System.Data.SqlClient;
+using Attunity.SqlServer.CDCControlTask;
 
 // Links : EzAPI
 // http://social.msdn.microsoft.com/Forums/sqlserver/en-US/eb8b10bc-963c-4d36-8ea2-6c3ebbc20411/copying-600-tables-in-ssis-how-to?forum=sqlintegrationservices
 // http://www.experts-exchange.com/Database/MS-SQL-Server/Q_23972361.html
+// Fix permissions:
+// http://www.mssqltips.com/sqlservertip/3086/how-to-resolve-ssis-access-denied-error-in-sql-server-management-studio/
 
 namespace SQLServerCDCSync
 {
@@ -22,7 +25,7 @@ namespace SQLServerCDCSync
             return null;
         }
 
-        public static bool GenerateSSISPackage(string filename, string sourceconn, string destinationconn, string[] tables)
+        public static bool GenerateSSISPackage(string filename, string sourceconn, string destinationconn, string table)
         {
             Application app = new Application();
             Package package = new Package();
@@ -35,20 +38,71 @@ namespace SQLServerCDCSync
             destinationManager.ConnectionString = destinationconn;
             destinationManager.Name = "Destination Connection";
 
-            // Add Truncate Table task
-            TaskHost truncateTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
-            truncateTable.Name = "Truncate Table";
-            truncateTable.Properties["Connection"].SetValue(truncateTable, destinationManager.ID);
-            truncateTable.Properties["SqlStatementSource"].SetValue(truncateTable, String.Concat(tables.Select(s => String.Format("TRUNCATE TABLE {0};", s))));
+            var sourcedbname = (new System.Data.SqlClient.SqlConnectionStringBuilder(sourceconn)).InitialCatalog;
+
+            // Add variables
+            package.Variables.Add("CDC_State", false, "User", "");
+
+            // Create destination Table from source table definiation
+            TaskHost createDestinationTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
+            createDestinationTable.Name = "Create destination table from source table definiation";
+            createDestinationTable.Properties["Connection"].SetValue(createDestinationTable, destinationManager.ID);
+            createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, String.Format("SELECT * INTO [dbo].[{1}] FROM [{0}].[dbo].[{1}] WHERE 1 = 2;", sourcedbname, table));
+
+            // Add CDC State Table
+            TaskHost addCDCStateTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
+            addCDCStateTable.Name = "Add CDC State Table";
+            addCDCStateTable.Properties["Connection"].SetValue(addCDCStateTable, destinationManager.ID);
+            addCDCStateTable.Properties["SqlStatementSource"].SetValue(addCDCStateTable, 
+                "CREATE TABLE [dbo].[cdc_states] ([name] [nvarchar](256) NOT NULL, [state] [nvarchar](256) NOT NULL) ON [PRIMARY];" + 
+                "CREATE UNIQUE NONCLUSTERED INDEX [cdc_states_name] ON [dbo].[cdc_states] ( [name] ASC ) WITH (PAD_INDEX  = OFF) ON [PRIMARY];"
+            );
 
             // Add copy table task
             TaskHost dataFlowTask = package.Executables.Add("STOCK:PipelineTask") as TaskHost;
             dataFlowTask.Name = "Copy source to destination";
+            dataFlowTask.DelayValidation = true;
             MainPipe dataFlowTaskPipe = (MainPipe)dataFlowTask.InnerObject;
 
+            // Add CDC Initial load start
+            TaskHost cdcControlTaskStartLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
+            cdcControlTaskStartLoad.Name = "Mark initial load start";
+            cdcControlTaskStartLoad.Properties["Connection"].SetValue(cdcControlTaskStartLoad, sourceManager.ID);
+            cdcControlTaskStartLoad.Properties["TaskOperation"].SetValue(cdcControlTaskStartLoad, CdcControlTaskOperation.MarkInitialLoadStart);
+            cdcControlTaskStartLoad.Properties["StateConnection"].SetValue(cdcControlTaskStartLoad, destinationManager.ID);
+            cdcControlTaskStartLoad.Properties["StateVariable"].SetValue(cdcControlTaskStartLoad, "User::CDC_State");
+            cdcControlTaskStartLoad.Properties["AutomaticStatePersistence"].SetValue(cdcControlTaskStartLoad, true);
+            cdcControlTaskStartLoad.Properties["StateName"].SetValue(cdcControlTaskStartLoad, "CDC_State");
+            cdcControlTaskStartLoad.Properties["StateTable"].SetValue(cdcControlTaskStartLoad, "[dbo].[cdc_states]");
+            cdcControlTaskStartLoad.DelayValidation = true;
+
+            // Add CDC Initial load end
+            TaskHost cdcControlTaskEndLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
+            cdcControlTaskEndLoad.Name = "Mark initial load end";
+            cdcControlTaskEndLoad.Properties["Connection"].SetValue(cdcControlTaskEndLoad, sourceManager.ID);
+            cdcControlTaskEndLoad.Properties["TaskOperation"].SetValue(cdcControlTaskEndLoad, CdcControlTaskOperation.MarkInitialLoadEnd);
+            cdcControlTaskEndLoad.Properties["StateConnection"].SetValue(cdcControlTaskEndLoad, destinationManager.ID);
+            cdcControlTaskEndLoad.Properties["StateVariable"].SetValue(cdcControlTaskEndLoad, "User::CDC_State");
+            cdcControlTaskEndLoad.Properties["AutomaticStatePersistence"].SetValue(cdcControlTaskEndLoad, true);
+            cdcControlTaskEndLoad.Properties["StateName"].SetValue(cdcControlTaskEndLoad, "CDC_State");
+            cdcControlTaskEndLoad.Properties["StateTable"].SetValue(cdcControlTaskEndLoad, "[dbo].[cdc_states]");
+            cdcControlTaskEndLoad.DelayValidation = true;
+
             // Make sure we truncate before we run the dataflow
-            PrecedenceConstraint pcTruncateDataFlow = package.PrecedenceConstraints.Add((Executable)truncateTable, (Executable)dataFlowTask);
-            pcTruncateDataFlow.Value = DTSExecResult.Success;
+            PrecedenceConstraint pcaddCDCStateTableStartLoad = package.PrecedenceConstraints.Add((Executable)createDestinationTable, (Executable)addCDCStateTable);
+            pcaddCDCStateTableStartLoad.Value = DTSExecResult.Success;
+
+            // Make sure we truncate before we run the dataflow
+            PrecedenceConstraint pcTruncatecStartLoad = package.PrecedenceConstraints.Add((Executable)addCDCStateTable, (Executable)cdcControlTaskStartLoad);
+            pcTruncatecStartLoad.Value = DTSExecResult.Success;
+
+            // Make sure we truncate before we run the dataflow
+            PrecedenceConstraint pcStartLoadDataFlow = package.PrecedenceConstraints.Add((Executable)cdcControlTaskStartLoad, (Executable)dataFlowTask);
+            pcStartLoadDataFlow.Value = DTSExecResult.Success;
+
+            // Make sure we truncate before we run the dataflow
+            PrecedenceConstraint pcEndLoadDataFlow = package.PrecedenceConstraints.Add((Executable)dataFlowTask, (Executable)cdcControlTaskEndLoad);
+            pcEndLoadDataFlow.Value = DTSExecResult.Success;
 
             // Configure the source
             IDTSComponentMetaData100 adonetsrc = dataFlowTaskPipe.ComponentMetaDataCollection.New();
@@ -73,8 +127,9 @@ namespace SQLServerCDCSync
             IDTSDesigntimeComponent100 adonetdstinstance = adonetdst.Instantiate();
             adonetdstinstance.ProvideComponentProperties();
             adonetdstinstance.SetComponentProperty("TableOrViewName", "\"dbo\".\"Test1\"");
-            adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(destinationManager);
-            adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = destinationManager.ID;
+            adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(sourceManager);
+            adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = sourceManager.ID;
+
             adonetdstinstance.AcquireConnections(null);
             adonetdstinstance.ReinitializeMetaData();
             adonetdstinstance.ReleaseConnections();
@@ -109,6 +164,9 @@ namespace SQLServerCDCSync
                     }
                 }
             }
+
+            adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(destinationManager);
+            adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = destinationManager.ID;
 
             app.SaveToXml(filename, package, null);
 
