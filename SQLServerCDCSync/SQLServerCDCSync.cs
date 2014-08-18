@@ -40,6 +40,17 @@ namespace SQLServerCDCSync
 
             var sourcedbname = (new System.Data.SqlClient.SqlConnectionStringBuilder(sourceconn)).InitialCatalog;
 
+            // Add CDC State Table
+            TaskHost createCDCStateTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
+            createCDCStateTable.Name = "Create CDC state table if it does not exist";
+            createCDCStateTable.Properties["Connection"].SetValue(createCDCStateTable, destinationManager.ID);
+            createCDCStateTable.Properties["SqlStatementSource"].SetValue(createCDCStateTable,
+                "IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='cdc_states' and xtype='U') BEGIN " +
+                    "CREATE TABLE [dbo].[cdc_states] ([name] [nvarchar](256) NOT NULL, [state] [nvarchar](256) NOT NULL) ON [PRIMARY];" +
+                    "CREATE UNIQUE NONCLUSTERED INDEX [cdc_states_name] ON [dbo].[cdc_states] ( [name] ASC ) WITH (PAD_INDEX  = OFF) ON [PRIMARY];" +
+                "END;"
+            );
+
             foreach (var table in tables)
             {
                 // Add variables
@@ -47,28 +58,19 @@ namespace SQLServerCDCSync
 
                 // Create destination Table from source table definiation
                 TaskHost createDestinationTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
-                createDestinationTable.Name = "Create destination table from source table definiation";
+                createDestinationTable.Name = "Create destination " + table + " from source table definiation";
                 createDestinationTable.Properties["Connection"].SetValue(createDestinationTable, destinationManager.ID);
                 createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, String.Format("SELECT * INTO [dbo].[{1}] FROM [{0}].[dbo].[{1}] WHERE 1 = 2;", sourcedbname, table));
 
-                // Add CDC State Table
-                TaskHost addCDCStateTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
-                addCDCStateTable.Name = "Add CDC State Table";
-                addCDCStateTable.Properties["Connection"].SetValue(addCDCStateTable, destinationManager.ID);
-                addCDCStateTable.Properties["SqlStatementSource"].SetValue(addCDCStateTable,
-                    "CREATE TABLE [dbo].[cdc_states] ([name] [nvarchar](256) NOT NULL, [state] [nvarchar](256) NOT NULL) ON [PRIMARY];" +
-                    "CREATE UNIQUE NONCLUSTERED INDEX [cdc_states_name] ON [dbo].[cdc_states] ( [name] ASC ) WITH (PAD_INDEX  = OFF) ON [PRIMARY];"
-                );
-
                 // Add copy table task
                 TaskHost dataFlowTask = package.Executables.Add("STOCK:PipelineTask") as TaskHost;
-                dataFlowTask.Name = "Copy source to destination";
+                dataFlowTask.Name = "Copy source to destination for " + table;
                 dataFlowTask.DelayValidation = true;
                 MainPipe dataFlowTaskPipe = (MainPipe)dataFlowTask.InnerObject;
 
                 // Add CDC Initial load start
                 TaskHost cdcControlTaskStartLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
-                cdcControlTaskStartLoad.Name = "Mark initial load start";
+                cdcControlTaskStartLoad.Name = "Mark initial load start for " + table;
                 cdcControlTaskStartLoad.Properties["Connection"].SetValue(cdcControlTaskStartLoad, sourceManager.ID);
                 cdcControlTaskStartLoad.Properties["TaskOperation"].SetValue(cdcControlTaskStartLoad, CdcControlTaskOperation.MarkInitialLoadStart);
                 cdcControlTaskStartLoad.Properties["StateConnection"].SetValue(cdcControlTaskStartLoad, destinationManager.ID);
@@ -80,7 +82,7 @@ namespace SQLServerCDCSync
 
                 // Add CDC Initial load end
                 TaskHost cdcControlTaskEndLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
-                cdcControlTaskEndLoad.Name = "Mark initial load end";
+                cdcControlTaskEndLoad.Name = "Mark initial load end for " + table;
                 cdcControlTaskEndLoad.Properties["Connection"].SetValue(cdcControlTaskEndLoad, sourceManager.ID);
                 cdcControlTaskEndLoad.Properties["TaskOperation"].SetValue(cdcControlTaskEndLoad, CdcControlTaskOperation.MarkInitialLoadEnd);
                 cdcControlTaskEndLoad.Properties["StateConnection"].SetValue(cdcControlTaskEndLoad, destinationManager.ID);
@@ -90,19 +92,12 @@ namespace SQLServerCDCSync
                 cdcControlTaskEndLoad.Properties["StateTable"].SetValue(cdcControlTaskEndLoad, "[dbo].[cdc_states]");
                 cdcControlTaskEndLoad.DelayValidation = true;
 
-                // Make sure we truncate before we run the dataflow
-                PrecedenceConstraint pcaddCDCStateTableStartLoad = package.PrecedenceConstraints.Add((Executable)createDestinationTable, (Executable)addCDCStateTable);
+                // Configure precedence
+                (package.PrecedenceConstraints.Add((Executable)createCDCStateTable, (Executable)createDestinationTable)).Value = DTSExecResult.Success;
+                PrecedenceConstraint pcaddCDCStateTableStartLoad = package.PrecedenceConstraints.Add((Executable)createDestinationTable, (Executable)cdcControlTaskStartLoad);
                 pcaddCDCStateTableStartLoad.Value = DTSExecResult.Success;
-
-                // Make sure we truncate before we run the dataflow
-                PrecedenceConstraint pcTruncatecStartLoad = package.PrecedenceConstraints.Add((Executable)addCDCStateTable, (Executable)cdcControlTaskStartLoad);
-                pcTruncatecStartLoad.Value = DTSExecResult.Success;
-
-                // Make sure we truncate before we run the dataflow
                 PrecedenceConstraint pcStartLoadDataFlow = package.PrecedenceConstraints.Add((Executable)cdcControlTaskStartLoad, (Executable)dataFlowTask);
                 pcStartLoadDataFlow.Value = DTSExecResult.Success;
-
-                // Make sure we truncate before we run the dataflow
                 PrecedenceConstraint pcEndLoadDataFlow = package.PrecedenceConstraints.Add((Executable)dataFlowTask, (Executable)cdcControlTaskEndLoad);
                 pcEndLoadDataFlow.Value = DTSExecResult.Success;
 
