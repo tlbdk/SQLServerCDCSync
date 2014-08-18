@@ -20,12 +20,64 @@ namespace SQLServerCDCSync
 {
     class SQLServerCDCSync
     {
-        public static string GenerateMergeSQL (string name, string sourcetable, string destinationtable, string[] colums)
+        public static void GenerateMergeLoadSSISPackage(string filename, string sourceconn, string destinationconn, string[] tables)
         {
-            return null;
+            Application app = new Application();
+            Package package = new Package();
+
+            // Add connection managers
+            ConnectionManager destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
+            destinationManager.ConnectionString = destinationconn;
+            destinationManager.Name = "Destination Connection";
+
+            var sourcedbname = (new System.Data.SqlClient.SqlConnectionStringBuilder(sourceconn)).InitialCatalog;
+
+            SqlConnection sourceConnnection = new SqlConnection(sourceconn);
+            sourceConnnection.Open();
+
+            foreach (var table in tables)
+            {
+                // Get Colums from database
+                SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand("SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('"+ table +"')", sourceConnnection);
+                var colums = new List<string>();
+                using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
+                {
+                    while (sqlRd.Read())
+                    {
+                        colums.Add(sqlRd.GetString(0));
+                    }
+                }
+
+                // Create the merge SQL statement
+                var merge_sql =
+                    "set @rowcount = 0;\n" +
+                    "set @start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CS/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CS/', @cdcstate) + 4) - CHARINDEX('/CS/', @cdcstate) - 4), 1));\n" +
+                    "set @end_lsn = convert(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CE/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CE/', @cdcstate) + 4) - CHARINDEX('/CE/', @cdcstate) - 4), 1);\n" +
+                    "IF @end_lsn > @start_lsn BEGIN\n" +
+                        "SET IDENTITY_INSERT [dbo].[" + table + "] ON;\n" +
+                        "MERGE [dbo].[" + table + "] AS D\n" +
+                        "USING " + sourcedbname + ".cdc.fn_cdc_get_net_changes_Test1(@start_lsn, @end_lsn, 'all with merge') AS S\n" +
+                        "ON (D.Id = S.Id)\n" +
+                        // Insert
+                        "WHEN NOT MATCHED BY TARGET AND __$operation = 5\n" +
+                            "THEN INSERT (" + String.Join(", ", colums) + ") VALUES(" + String.Join(", ", colums.Select(s => "S." + s)) + ")\n" +
+                        // Update
+                        "WHEN MATCHED AND __$operation = 5\n" +
+                            "THEN UPDATE SET " + String.Join(", ", colums.Select(s => "D." + s + " = S." + s)) + "\n" +
+                        // Delete
+                        "WHEN MATCHED AND __$operation = 1\n" +
+                            "THEN DELETE\n" +
+                        ";\n" +
+                        "set @rowcount = @@ROWCOUNT;\n" +
+                        "SET IDENTITY_INSERT [dbo].[" + table + "] OFF;\n" +
+                    "END\n" +
+                    "SELECT @rowcount as NumberOfRecords;\n";
+            }
+
+            app.SaveToXml(filename, package, null);
         }
 
-        public static bool GenerateInitialLoadSSISPackage(string filename, string sourceconn, string destinationconn, string[] tables)
+        public static void GenerateInitialLoadSSISPackage(string filename, string sourceconn, string destinationconn, string[] tables)
         {
             Application app = new Application();
             Package package = new Package();
@@ -166,8 +218,6 @@ namespace SQLServerCDCSync
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = destinationManager.ID;
             }
             app.SaveToXml(filename, package, null);
-
-            return true;
         }
 
     }
