@@ -35,19 +35,20 @@ namespace SQLServerCDCSync
             destinationManager.ConnectionString = destinationconn;
             destinationManager.Name = "Destination Connection";
 
-            /* var test = DtsConvert.GetExtendedInterface(sourceManager);
-            var test2 = DtsConvert.GetExtendedInterface(destinationManager); */
-
             // Add Truncate Table task
             TaskHost truncateTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
             truncateTable.Name = "Truncate Table";
-            truncateTable.Properties["Connection"].SetValue(truncateTable, sourceManager.ID);
+            truncateTable.Properties["Connection"].SetValue(truncateTable, destinationManager.ID);
             truncateTable.Properties["SqlStatementSource"].SetValue(truncateTable, String.Concat(tables.Select(s => String.Format("TRUNCATE TABLE {0};", s))));
 
             // Add copy table task
             TaskHost dataFlowTask = package.Executables.Add("STOCK:PipelineTask") as TaskHost;
             dataFlowTask.Name = "Copy source to destination";
             MainPipe dataFlowTaskPipe = (MainPipe)dataFlowTask.InnerObject;
+
+            // Make sure we truncate before we run the dataflow
+            PrecedenceConstraint pcTruncateDataFlow = package.PrecedenceConstraints.Add((Executable)truncateTable, (Executable)dataFlowTask);
+            pcTruncateDataFlow.Value = DTSExecResult.Success;
 
             // Configure the source
             IDTSComponentMetaData100 adonetsrc = dataFlowTaskPipe.ComponentMetaDataCollection.New();
@@ -71,7 +72,6 @@ namespace SQLServerCDCSync
             adonetdst.ComponentClassID = app.PipelineComponentInfos["ADO NET Destination"].CreationName;
             IDTSDesigntimeComponent100 adonetdstinstance = adonetdst.Instantiate();
             adonetdstinstance.ProvideComponentProperties();
-            //adonetdstinstance.SetComponentProperty("AccessMode", 3);
             adonetdstinstance.SetComponentProperty("TableOrViewName", "\"dbo\".\"Test1\"");
             adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(destinationManager);
             adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = destinationManager.ID;
@@ -79,9 +79,40 @@ namespace SQLServerCDCSync
             adonetdstinstance.ReinitializeMetaData();
             adonetdstinstance.ReleaseConnections();
 
+            // Attach the path from data flow source to destination
+            IDTSPath100 path = dataFlowTaskPipe.PathCollection.New();
+            path.AttachPathAndPropagateNotifications(adonetsrc.OutputCollection[0], adonetdst.InputCollection[0]);
+
+            
+            // Do coloum mapping on the destination
+            IDTSInput100 destInput = adonetdst.InputCollection[0];
+            IDTSExternalMetadataColumnCollection100 externalColumnCollection = destInput.ExternalMetadataColumnCollection;
+            IDTSVirtualInput100 destVirInput = destInput.GetVirtualInput();
+            IDTSInputColumnCollection100 destInputCols = destInput.InputColumnCollection;
+            IDTSExternalMetadataColumnCollection100 destExtCols = destInput.ExternalMetadataColumnCollection;
+            IDTSOutputColumnCollection100 sourceColumns = adonetsrc.OutputCollection[0].OutputColumnCollection;
+
+            // Hook up the external columns
+            foreach (IDTSOutputColumn100 outputCol in sourceColumns)
+            {
+                // Get the external column id
+                IDTSExternalMetadataColumn100 extCol = (IDTSExternalMetadataColumn100)destExtCols[outputCol.Name];
+                if (extCol != null)
+                {
+                    // Create an input column from an output col of previous component.
+                    destVirInput.SetUsageType(outputCol.ID, DTSUsageType.UT_READONLY);
+                    IDTSInputColumn100 inputCol = destInputCols.GetInputColumnByLineageID(outputCol.ID);
+                    if (inputCol != null)
+                    {
+                        // map the input column with an external metadata column
+                        adonetdstinstance.MapInputColumn(destInput.ID, inputCol.ID, extCol.ID);
+                    }
+                }
+            }
+
             app.SaveToXml(filename, package, null);
 
-            return false;
+            return true;
         }
 
     }
