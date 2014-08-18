@@ -25,7 +25,7 @@ namespace SQLServerCDCSync
             return null;
         }
 
-        public static bool GenerateSSISPackage(string filename, string sourceconn, string destinationconn, string table)
+        public static bool GenerateInitialLoadSSISPackage(string filename, string sourceconn, string destinationconn, string table)
         {
             Application app = new Application();
             Package package = new Package();
@@ -72,7 +72,7 @@ namespace SQLServerCDCSync
             cdcControlTaskStartLoad.Properties["StateConnection"].SetValue(cdcControlTaskStartLoad, destinationManager.ID);
             cdcControlTaskStartLoad.Properties["StateVariable"].SetValue(cdcControlTaskStartLoad, "User::CDC_State");
             cdcControlTaskStartLoad.Properties["AutomaticStatePersistence"].SetValue(cdcControlTaskStartLoad, true);
-            cdcControlTaskStartLoad.Properties["StateName"].SetValue(cdcControlTaskStartLoad, "CDC_State");
+            cdcControlTaskStartLoad.Properties["StateName"].SetValue(cdcControlTaskStartLoad, table + "_State");
             cdcControlTaskStartLoad.Properties["StateTable"].SetValue(cdcControlTaskStartLoad, "[dbo].[cdc_states]");
             cdcControlTaskStartLoad.DelayValidation = true;
 

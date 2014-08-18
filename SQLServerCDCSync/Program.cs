@@ -10,7 +10,7 @@ namespace SQLServerCDCSync
     {
         static void Main(string[] args)
         {
-            SQLServerCDCSync.GenerateSSISPackage(@"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\InitialLoadTest1.dtsx",
+            SQLServerCDCSync.GenerateInitialLoadSSISPackage(@"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\InitialLoadTest1.dtsx",
                 "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSync;connection timeout=30",
                 "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSyncDestination;connection timeout=30", 
                 "Test1"
