@@ -11,8 +11,8 @@
   DTS:LocaleID="1030"
   DTS:ObjectName="MergeLoad"
   DTS:PackageType="5"
-  DTS:VersionBuild="22"
-  DTS:VersionGUID="{062DEEE1-554A-46E9-99F8-B39EEAA957CB}">
+  DTS:VersionBuild="27"
+  DTS:VersionGUID="{B1466CEB-C810-4275-967F-107ED8411433}">
   <DTS:Property
     DTS:Name="PackageFormatVersion">8</DTS:Property>
   <DTS:ConnectionManagers>
@@ -171,6 +171,10 @@
       <GraphLayout
         Capacity="8" xmlns="clr-namespace:Microsoft.SqlServer.IntegrationServices.Designer.Model.Serialization;assembly=Microsoft.SqlServer.IntegrationServices.Graph" xmlns:mssgle="clr-namespace:Microsoft.SqlServer.Graph.LayoutEngine;assembly=Microsoft.SqlServer.Graph" xmlns:assembly="http://schemas.microsoft.com/winfx/2006/xaml">
         <NodeLayout
+          Size="199,42"
+          Id="Package\Execute Merge Command"
+          TopLeft="123,111" />
+        <NodeLayout
           Size="205,42"
           Id="Package\Get CDC Processing Range"
           TopLeft="117,31" />
@@ -178,10 +182,6 @@
           Size="209,42"
           Id="Package\Mark CDC Processed Range"
           TopLeft="123,196" />
-        <NodeLayout
-          Size="199,42"
-          Id="Package\Execute Merge Command"
-          TopLeft="123,111" />
         <EdgeLayout
           Id="Package.PrecedenceConstraints[Constraint]"
           TopLeft="221,73">
