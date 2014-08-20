@@ -10,6 +10,8 @@ set @start_lsn = SQLServerCDCSync.sys.fn_cdc_increment_lsn(CONVERT(binary(10), S
 set @end_lsn = convert(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CE/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CE/', @cdcstate) + 4) - CHARINDEX('/CE/', @cdcstate) - 4), 1);
 
 IF @end_lsn > @start_lsn BEGIN
+SELECT * FROM SQLServerCDCSync.cdc.fn_cdc_get_net_changes_Test1(@start_lsn, @end_lsn, 'all with merge');
+
 SET IDENTITY_INSERT [dbo].[Test1] ON;
 MERGE [dbo].[Test1] AS D
 USING SQLServerCDCSync.cdc.fn_cdc_get_net_changes_Test1(@start_lsn, @end_lsn, 'all with merge') AS S
