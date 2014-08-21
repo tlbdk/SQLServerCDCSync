@@ -10,6 +10,7 @@ using System.Globalization;
 using System.Data.SqlClient;
 using Attunity.SqlServer.CDCControlTask;
 using Microsoft.SqlServer.Dts.Tasks.ExecuteSQLTask;
+using System.Data.OracleClient;
 
 // Links : EzAPI
 // http://social.msdn.microsoft.com/Forums/sqlserver/en-US/eb8b10bc-963c-4d36-8ea2-6c3ebbc20411/copying-600-tables-in-ssis-how-to?forum=sqlintegrationservices
@@ -33,7 +34,7 @@ namespace SQLServerCDCSync
             Package package = new Package();
 
             package.Name = "CDC Merge Load Package for tables " + String.Join(", ", tables);
-
+            
             // Add connection managers
             ConnectionManager sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
             sourceManager.ConnectionString = sourceconn;
@@ -161,25 +162,42 @@ namespace SQLServerCDCSync
             app.SaveToXml(filename, package, null);
         }
 
-        public static void GenerateInitialLoadSSISPackage(string filename, string sourceconn, string destinationconn, string[] tables)
+        public static void GenerateInitialLoadSSISPackage(string filename, string sourceprovider, string sourceconn, string destinationconn, string cdcdatabase, string[] tables)
         {
             Application app = new Application();
             Package package = new Package();
 
             package.Name = "CDC Initial Load Package for tables " + String.Join(", ", tables);
 
-            // Add connection managers
-            ConnectionManager sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
+            ConnectionManager sourceManager;
+            ConnectionManager destinationManager;
+
+            if (sourceprovider == "System.Data.SqlClient")
+            {
+                // Add SQL Server connection managers
+                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
+                destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
+               
+
+            }
+            else if (sourceprovider == "System.Data.OracleClient")
+            {
+                // Add SQL Server connection managers
+                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(OracleConnection).AssemblyQualifiedName));
+                destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(OracleConnection).AssemblyQualifiedName));
+            }
+            else
+            {
+                throw new Exception("Unknown connection provider");
+            }
+
             sourceManager.ConnectionString = sourceconn;
             sourceManager.Name = "Source Connection";
-            ConnectionManager destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
             destinationManager.ConnectionString = destinationconn;
             destinationManager.Name = "Destination Connection";
 
             // Add variables
             package.Variables.Add("CDC_State", false, "User", "");
-
-            var sourcedbname = (new System.Data.SqlClient.SqlConnectionStringBuilder(sourceconn)).InitialCatalog;
 
             // Add CDC State Table
             TaskHost createCDCStateTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
@@ -225,7 +243,7 @@ namespace SQLServerCDCSync
                 TaskHost createDestinationTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
                 createDestinationTable.Name = "Create destination " + table + " from source table definiation";
                 createDestinationTable.Properties["Connection"].SetValue(createDestinationTable, destinationManager.ID);
-                createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, String.Format("SELECT * INTO [dbo].[{1}] FROM [{0}].[dbo].[{1}] WHERE 1 = 2;", sourcedbname, table));
+                createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, String.Format("SELECT * INTO [dbo].[{1}] FROM [{0}].[dbo].[{1}] WHERE 1 = 2;", cdcdatabase, table));
                 
                 // Configure precedence
                 (package.PrecedenceConstraints.Add((Executable)createDestinationTable, (Executable)cdcControlTaskStartLoad)).Value = DTSExecResult.Success;
