@@ -28,7 +28,28 @@ namespace SQLServerCDCSync
 {
     class SQLServerCDCSync
     {
-        public static void GenerateMergeLoadSSISPackage(string filename, string sourceconn, string destinationconn, string[] tables)
+        public static void InitializeEnvironment()
+        {
+            // Make sure Oracle PATH and environment variables are set else OracleClient won't work
+            string oraclehome;
+            string path = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process);
+            if (Environment.GetEnvironmentVariable("ORACLE_HOME") == null)
+            {
+                oraclehome = OracleUtils.GetOracleHome();
+                Environment.SetEnvironmentVariable("ORACLE_HOME", oraclehome, EnvironmentVariableTarget.Process);
+            }
+            else
+            {
+                oraclehome = Environment.GetEnvironmentVariable("ORACLE_HOME");
+            }
+            if (!path.Contains(oraclehome))
+            {
+
+                Environment.SetEnvironmentVariable("PATH", path + ";" + oraclehome, EnvironmentVariableTarget.Process);
+            }
+        }
+
+        public static void GenerateMergeLoadSSISPackage(string filename, string destinationconn, string cdcdatabase, string[] tables)
         {
             Application app = new Application();
             Package package = new Package();
@@ -36,24 +57,26 @@ namespace SQLServerCDCSync
             package.Name = "CDC Merge Load Package for tables " + String.Join(", ", tables);
             
             // Add connection managers
-            ConnectionManager sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
-            sourceManager.ConnectionString = sourceconn;
-            sourceManager.Name = "Source Connection";
             ConnectionManager destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
             destinationManager.ConnectionString = destinationconn;
             destinationManager.Name = "Destination Connection";
-
-            var sourcedbname = (new System.Data.SqlClient.SqlConnectionStringBuilder(sourceconn)).InitialCatalog;
+            
+            // Build the CDC connection string
+            var cdcconn = (new System.Data.SqlClient.SqlConnectionStringBuilder(destinationconn));
+            cdcconn.InitialCatalog = cdcdatabase;
+            ConnectionManager cdcManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
+            cdcManager.ConnectionString = cdcconn.ConnectionString;
+            cdcManager.Name = "CDC database Connection";
 
             package.Variables.Add("CDC_State", false, "User", "");
 
-            SqlConnection sourceConnnection = new SqlConnection(sourceconn);
+            SqlConnection sourceConnnection = new SqlConnection(cdcconn.ConnectionString);
             sourceConnnection.Open();
 
             // Add CDC Get CDC Processing Range
             TaskHost cdcControlTaskGetRange = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
             cdcControlTaskGetRange.Name = "Get CDC Processing Range";
-            cdcControlTaskGetRange.Properties["Connection"].SetValue(cdcControlTaskGetRange, sourceManager.ID);
+            cdcControlTaskGetRange.Properties["Connection"].SetValue(cdcControlTaskGetRange, cdcManager.ID);
             cdcControlTaskGetRange.Properties["TaskOperation"].SetValue(cdcControlTaskGetRange, CdcControlTaskOperation.GetProcessingRange);
             cdcControlTaskGetRange.Properties["StateConnection"].SetValue(cdcControlTaskGetRange, destinationManager.ID);
             cdcControlTaskGetRange.Properties["StateVariable"].SetValue(cdcControlTaskGetRange, "User::CDC_State");
@@ -66,7 +89,7 @@ namespace SQLServerCDCSync
             // Add Mark CDC Processed Range
             TaskHost cdcControlTaskMarkRange = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
             cdcControlTaskMarkRange.Name = "Mark CDC Processed Range";
-            cdcControlTaskMarkRange.Properties["Connection"].SetValue(cdcControlTaskMarkRange, sourceManager.ID);
+            cdcControlTaskMarkRange.Properties["Connection"].SetValue(cdcControlTaskMarkRange, cdcManager.ID);
             cdcControlTaskMarkRange.Properties["TaskOperation"].SetValue(cdcControlTaskMarkRange, CdcControlTaskOperation.MarkProcessedRange);
             cdcControlTaskMarkRange.Properties["StateConnection"].SetValue(cdcControlTaskMarkRange, destinationManager.ID);
             cdcControlTaskMarkRange.Properties["StateVariable"].SetValue(cdcControlTaskMarkRange, "User::CDC_State");
@@ -87,6 +110,7 @@ namespace SQLServerCDCSync
             {
                 var identityColums = new HashSet<String>();
                 var colums = new List<string>();
+                
                 // Get Colums from database
                 SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand("SELECT name, is_identity FROM sys.columns WHERE object_id = OBJECT_ID('" + table + "')", sourceConnnection);
                 using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
@@ -112,7 +136,7 @@ namespace SQLServerCDCSync
                     "IF @end_lsn > @start_lsn BEGIN\n" +
                         "SET IDENTITY_INSERT [dbo].[" + table + "] ON;\n" +
                         "MERGE [dbo].[" + table + "] AS D\n" +
-                        "USING " + sourcedbname + ".cdc.fn_cdc_get_net_changes_Test1(@start_lsn, @end_lsn, 'all with merge') AS S\n" +
+                        "USING " + cdcdatabase + ".cdc.fn_cdc_get_net_changes_Test1(@start_lsn, @end_lsn, 'all with merge') AS S\n" +
                         "ON (" + String.Join(" AND ", identityColums.Select(s => "D." + s + " = " + "S." + s)) + ")\n" +
                         // Insert
                         "WHEN NOT MATCHED BY TARGET AND __$operation = 5\n" +
@@ -170,21 +194,41 @@ namespace SQLServerCDCSync
             package.Name = "CDC Initial Load Package for tables " + String.Join(", ", tables);
 
             ConnectionManager sourceManager;
-            ConnectionManager destinationManager;
+            ConnectionManager destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
+            destinationManager.ConnectionString = destinationconn;
+            destinationManager.Name = "Destination Connection";
 
-            if (sourceprovider == "System.Data.SqlClient")
+            // Build the CDC connection string
+            var cdcconn = (new System.Data.SqlClient.SqlConnectionStringBuilder(destinationconn));
+            cdcconn.InitialCatalog = cdcdatabase;
+            ConnectionManager cdcManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
+            cdcManager.ConnectionString = cdcconn.ConnectionString;
+            cdcManager.Name = "CDC database Connection";
+
+            // Get CDC tables from database
+            SqlConnection cdcConnnection = new SqlConnection(cdcconn.ConnectionString);
+            cdcConnnection.Open();
+            var cdctables = new Dictionary<String,String>();
+            SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand(
+                "SELECT s.name, t.name " +
+                "FROM sys.tables t INNER JOIN sys.schemas s ON (t.schema_id = s.schema_id) " +
+                "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1;", cdcConnnection);
+            using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
             {
-                // Add SQL Server connection managers
-                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
-                destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
-               
+                while (sqlRd.Read())
+                {
+                    cdctables[sqlRd.GetString(1)] =  sqlRd.GetString(0) + "." + sqlRd.GetString(1) + "";
+                }
+            }
 
+            // Source connection managers
+            if (sourceprovider == "System.Data.SqlClient")
+            {                
+                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
             }
             else if (sourceprovider == "System.Data.OracleClient")
             {
-                // Add SQL Server connection managers
                 sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(OracleConnection).AssemblyQualifiedName));
-                destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(OracleConnection).AssemblyQualifiedName));
             }
             else
             {
@@ -193,12 +237,7 @@ namespace SQLServerCDCSync
 
             sourceManager.ConnectionString = sourceconn;
             sourceManager.Name = "Source Connection";
-            destinationManager.ConnectionString = destinationconn;
-            destinationManager.Name = "Destination Connection";
-
-            // Add variables
-            package.Variables.Add("CDC_State", false, "User", "");
-
+           
             // Add CDC State Table
             TaskHost createCDCStateTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
             createCDCStateTable.Name = "Create CDC state table if it does not exist";
@@ -210,56 +249,52 @@ namespace SQLServerCDCSync
                 "END;"
             );
 
-            // Add CDC Initial load start
-            TaskHost cdcControlTaskStartLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
-            cdcControlTaskStartLoad.Name = "Mark initial load start";
-            cdcControlTaskStartLoad.Properties["Connection"].SetValue(cdcControlTaskStartLoad, sourceManager.ID);
-            cdcControlTaskStartLoad.Properties["TaskOperation"].SetValue(cdcControlTaskStartLoad, CdcControlTaskOperation.MarkInitialLoadStart);
-            cdcControlTaskStartLoad.Properties["StateConnection"].SetValue(cdcControlTaskStartLoad, destinationManager.ID);
-            cdcControlTaskStartLoad.Properties["StateVariable"].SetValue(cdcControlTaskStartLoad, "User::CDC_State");
-            cdcControlTaskStartLoad.Properties["AutomaticStatePersistence"].SetValue(cdcControlTaskStartLoad, true);
-            cdcControlTaskStartLoad.Properties["StateName"].SetValue(cdcControlTaskStartLoad, "CDC_State");
-            cdcControlTaskStartLoad.Properties["StateTable"].SetValue(cdcControlTaskStartLoad, "[dbo].[cdc_states]");
-            cdcControlTaskStartLoad.DelayValidation = true;
-
-            // Add CDC Initial load end
-            TaskHost cdcControlTaskEndLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
-            cdcControlTaskEndLoad.Name = "Mark initial load end";
-            cdcControlTaskEndLoad.Properties["Connection"].SetValue(cdcControlTaskEndLoad, sourceManager.ID);
-            cdcControlTaskEndLoad.Properties["TaskOperation"].SetValue(cdcControlTaskEndLoad, CdcControlTaskOperation.MarkInitialLoadEnd);
-            cdcControlTaskEndLoad.Properties["StateConnection"].SetValue(cdcControlTaskEndLoad, destinationManager.ID);
-            cdcControlTaskEndLoad.Properties["StateVariable"].SetValue(cdcControlTaskEndLoad, "User::CDC_State");
-            cdcControlTaskEndLoad.Properties["AutomaticStatePersistence"].SetValue(cdcControlTaskEndLoad, true);
-            cdcControlTaskEndLoad.Properties["StateName"].SetValue(cdcControlTaskEndLoad, "CDC_State");
-            cdcControlTaskEndLoad.Properties["StateTable"].SetValue(cdcControlTaskEndLoad, "[dbo].[cdc_states]");
-            cdcControlTaskEndLoad.DelayValidation = true;
-
-            // Configure precedence
-            (package.PrecedenceConstraints.Add((Executable)createCDCStateTable, (Executable)cdcControlTaskStartLoad)).Value = DTSExecResult.Success;
-
             foreach (var table in tables)
             {
+                // Add variables
+                package.Variables.Add("CDC_State_" + table, false, "User", "");
+
                 // Create destination Table from source table definiation
                 TaskHost createDestinationTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
                 createDestinationTable.Name = "Create destination " + table + " from source table definiation";
                 createDestinationTable.Properties["Connection"].SetValue(createDestinationTable, destinationManager.ID);
-                createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, String.Format("SELECT * INTO [dbo].[{1}] FROM [{0}].[dbo].[{1}] WHERE 1 = 2;", cdcdatabase, table));
-                
-                // Configure precedence
-                (package.PrecedenceConstraints.Add((Executable)createDestinationTable, (Executable)cdcControlTaskStartLoad)).Value = DTSExecResult.Success;
-            }
+                createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, String.Format("SELECT * INTO [dbo].{0} FROM [{1}].{2} WHERE 1 = 2;", table, cdcdatabase, cdctables[table]));
 
-            foreach (var table in tables)
-            {
+                // Add CDC Initial load start
+                TaskHost cdcMarkStartInitialLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
+                cdcMarkStartInitialLoad.Name = "Mark initial load start for table " + table;
+                cdcMarkStartInitialLoad.Properties["Connection"].SetValue(cdcMarkStartInitialLoad, cdcManager.ID);
+                cdcMarkStartInitialLoad.Properties["TaskOperation"].SetValue(cdcMarkStartInitialLoad, CdcControlTaskOperation.MarkInitialLoadStart);
+                cdcMarkStartInitialLoad.Properties["StateConnection"].SetValue(cdcMarkStartInitialLoad, destinationManager.ID);
+                cdcMarkStartInitialLoad.Properties["StateVariable"].SetValue(cdcMarkStartInitialLoad, "User::CDC_State_" + table);
+                cdcMarkStartInitialLoad.Properties["AutomaticStatePersistence"].SetValue(cdcMarkStartInitialLoad, true);
+                cdcMarkStartInitialLoad.Properties["StateName"].SetValue(cdcMarkStartInitialLoad, "CDC_State_" + table );
+                cdcMarkStartInitialLoad.Properties["StateTable"].SetValue(cdcMarkStartInitialLoad, "[dbo].[cdc_states]");
+                cdcMarkStartInitialLoad.DelayValidation = true;
+
                 // Add copy table task
                 TaskHost dataFlowTask = package.Executables.Add("STOCK:PipelineTask") as TaskHost;
                 dataFlowTask.Name = "Copy source to destination for " + table;
                 dataFlowTask.DelayValidation = true;
                 MainPipe dataFlowTaskPipe = (MainPipe)dataFlowTask.InnerObject;
 
+                // Add CDC Initial load end
+                TaskHost cdcMarkEndInitialLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
+                cdcMarkEndInitialLoad.Name = "Mark initial load end for table " + table;
+                cdcMarkEndInitialLoad.Properties["Connection"].SetValue(cdcMarkEndInitialLoad, cdcManager.ID);
+                cdcMarkEndInitialLoad.Properties["TaskOperation"].SetValue(cdcMarkEndInitialLoad, CdcControlTaskOperation.MarkInitialLoadEnd);
+                cdcMarkEndInitialLoad.Properties["StateConnection"].SetValue(cdcMarkEndInitialLoad, destinationManager.ID);
+                cdcMarkEndInitialLoad.Properties["StateVariable"].SetValue(cdcMarkEndInitialLoad, "User::CDC_State_" + table);
+                cdcMarkEndInitialLoad.Properties["AutomaticStatePersistence"].SetValue(cdcMarkEndInitialLoad, true);
+                cdcMarkEndInitialLoad.Properties["StateName"].SetValue(cdcMarkEndInitialLoad, "CDC_State_" + table);
+                cdcMarkEndInitialLoad.Properties["StateTable"].SetValue(cdcMarkEndInitialLoad, "[dbo].[cdc_states]");
+                cdcMarkEndInitialLoad.DelayValidation = true;
+
                 // Configure precedence
-                (package.PrecedenceConstraints.Add((Executable)cdcControlTaskStartLoad, (Executable)dataFlowTask)).Value = DTSExecResult.Success;
-                (package.PrecedenceConstraints.Add((Executable)dataFlowTask, (Executable)cdcControlTaskEndLoad)).Value = DTSExecResult.Success;
+                (package.PrecedenceConstraints.Add((Executable)createCDCStateTable, (Executable)createDestinationTable)).Value = DTSExecResult.Success;
+                (package.PrecedenceConstraints.Add((Executable)createDestinationTable, (Executable)cdcMarkStartInitialLoad)).Value = DTSExecResult.Success;
+                (package.PrecedenceConstraints.Add((Executable)cdcMarkStartInitialLoad, (Executable)dataFlowTask)).Value = DTSExecResult.Success;
+                (package.PrecedenceConstraints.Add((Executable)dataFlowTask, (Executable)cdcMarkEndInitialLoad)).Value = DTSExecResult.Success;
 
                 // Configure the source
                 IDTSComponentMetaData100 adonetsrc = dataFlowTaskPipe.ComponentMetaDataCollection.New();
@@ -269,7 +304,7 @@ namespace SQLServerCDCSync
                 IDTSDesigntimeComponent100 adonetsrcinstance = adonetsrc.Instantiate();
                 adonetsrcinstance.ProvideComponentProperties();
                 adonetsrcinstance.SetComponentProperty("AccessMode", 0);
-                adonetsrcinstance.SetComponentProperty("TableOrViewName", "\"dbo\".\"" + table + "\"");
+                adonetsrcinstance.SetComponentProperty("TableOrViewName", table);
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(sourceManager);
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManagerID = sourceManager.ID;
                 adonetsrcinstance.AcquireConnections(null);
@@ -283,10 +318,10 @@ namespace SQLServerCDCSync
                 adonetdst.ComponentClassID = app.PipelineComponentInfos["ADO NET Destination"].CreationName;
                 IDTSDesigntimeComponent100 adonetdstinstance = adonetdst.Instantiate();
                 adonetdstinstance.ProvideComponentProperties();
-                adonetdstinstance.SetComponentProperty("TableOrViewName", "\"dbo\".\"" + table + "\"");
-                adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(sourceManager);
-                adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = sourceManager.ID;
-
+                adonetdstinstance.SetComponentProperty("TableOrViewName", cdctables[table]); // TODO
+                // Point to the CDC tables when generating the metadata
+                adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(cdcManager);
+                adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = cdcManager.ID;
                 adonetdstinstance.AcquireConnections(null);
                 adonetdstinstance.ReinitializeMetaData();
                 adonetdstinstance.ReleaseConnections();
@@ -294,7 +329,6 @@ namespace SQLServerCDCSync
                 // Attach the path from data flow source to destination
                 IDTSPath100 path = dataFlowTaskPipe.PathCollection.New();
                 path.AttachPathAndPropagateNotifications(adonetsrc.OutputCollection[0], adonetdst.InputCollection[0]);
-
 
                 // Do coloum mapping on the destination
                 IDTSInput100 destInput = adonetdst.InputCollection[0];
@@ -324,10 +358,10 @@ namespace SQLServerCDCSync
 
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(destinationManager);
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = destinationManager.ID;
+                adonetdstinstance.SetComponentProperty("TableOrViewName",  table);
             }
 
             app.SaveToXml(filename, package, null);
         }
-
     }
 }

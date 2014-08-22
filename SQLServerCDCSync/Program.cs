@@ -10,17 +10,21 @@ namespace SQLServerCDCSync
     {
         static void Main(string[] args)
         {
+            string sourceconn = "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSync;connection timeout=30";
+            string destinationconn = "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSyncDestination;connection timeout=30";
+            string cdcdatabase = "SQLServerCDCSync";
+            string[] tables = new string[] { "Test1", "Test2" };
+
+            // Make sure external dependencies such as environment variables are initialized 
+            SQLServerCDCSync.InitializeEnvironment();
+
+            // Generate initial sync package
             SQLServerCDCSync.GenerateInitialLoadSSISPackage(@"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\InitialLoadTest1.dtsx",
-                "System.Data.SqlClient","user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSync;connection timeout=30",
-                "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSyncDestination;connection timeout=30",
-                "SQLServerCDCSync",
-                new String[] { "Test1", "Test2" }
+                "System.Data.OracleClient", sourceconn, destinationconn, cdcdatabase, tables
             );
 
             SQLServerCDCSync.GenerateMergeLoadSSISPackage(@"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\MergeLoadTest1.dtsx",
-                "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSync;connection timeout=30",
-                "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSyncDestination;connection timeout=30",
-                new String[] { "Test1", "Test2" }
+                destinationconn, cdcdatabase, tables
             );
         }
     }
