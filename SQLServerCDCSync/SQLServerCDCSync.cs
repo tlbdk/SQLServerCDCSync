@@ -105,10 +105,15 @@ namespace SQLServerCDCSync
                 var merge_sql =
                     "declare @start_lsn binary(10);\n" +
                     "declare @end_lsn binary(10);\n" + 
-                    "declare @rowcount int;\n" +
-                    "set @rowcount = 0;\n" +
                     "set @start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CS/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CS/', @cdcstate) + 4) - CHARINDEX('/CS/', @cdcstate) - 4), 1));\n" +
                     "set @end_lsn = convert(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CE/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CE/', @cdcstate) + 4) - CHARINDEX('/CE/', @cdcstate) - 4), 1);\n" +
+					//"declare @table_start_lsn binary(10);\n" + 
+					//"set @table_start_lsn = (SELECT value FROM CDC_State WHERE name = " + table + ";)\n" +
+					//"if IFNULL(@table_start_lsn, 0) < @start_lsn BEGIN\n
+					//	set @start_lsn = @table_start_lsn;
+					//END\n
+					"declare @rowcount int;\n" +
+                    "set @rowcount = 0;\n" +
                     "IF @end_lsn > @start_lsn BEGIN\n" +
                         "SET IDENTITY_INSERT [dbo].[" + table + "] ON;\n" +
                         "MERGE [dbo].[" + table + "] AS D\n" +
@@ -126,6 +131,7 @@ namespace SQLServerCDCSync
                         ";\n" +
                         "set @rowcount = @@ROWCOUNT;\n" +
                         "SET IDENTITY_INSERT [dbo].[" + table + "] OFF;\n" +
+						//"DELETE FROM CDC_State WHERE name = " + table + ";)\n" +
                     "END\n" +
                     "SELECT @rowcount as RowsUpdated;\n";
 
