@@ -70,9 +70,6 @@ namespace SQLServerCDCSync
 
             package.Variables.Add("CDC_State", false, "User", "");
 
-            SqlConnection sourceConnnection = new SqlConnection(cdcconn.ConnectionString);
-            sourceConnnection.Open();
-
             // Add CDC Get CDC Processing Range
             TaskHost cdcControlTaskGetRange = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
             cdcControlTaskGetRange.Name = "Get CDC Processing Range";
@@ -106,57 +103,102 @@ namespace SQLServerCDCSync
             sequenceContainer.Name = "Sequence Container";
             sequenceContainer.TransactionOption = DTSTransactionOption.Required;
 
+            SqlConnection cdcConnnection = new SqlConnection(cdcconn.ConnectionString);
+            cdcConnnection.Open();
+
+            // Get list of CDC tables
+            var cdctables = new Dictionary<String, String>();
+            SqlCommand sqlcmdtables = new System.Data.SqlClient.SqlCommand(
+                "SELECT s.name, t.name " +
+                "FROM sys.tables t INNER JOIN sys.schemas s ON (t.schema_id = s.schema_id) " +
+                "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1;", cdcConnnection);
+            using (SqlDataReader sqlRd = sqlcmdtables.ExecuteReader())
+            {
+                while (sqlRd.Read())
+                {
+                    cdctables[sqlRd.GetString(1)] = sqlRd.GetString(0) + "_" + sqlRd.GetString(1) + "";
+                }
+            }
+
             foreach (var table in tables)
             {
-                var identityColums = new HashSet<String>();
+                var uniqueColums = new HashSet<String>();
                 var colums = new List<string>();
+                var identityColumsUsed = false;
                 
                 // Get Colums from database
-                SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand("SELECT name, is_identity FROM sys.columns WHERE object_id = OBJECT_ID('" + table + "')", sourceConnnection);
+                SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand(
+                    "SELECT c.name, is_identity, ISNULL(i.is_unique, 0)\n" +
+                    "FROM sys.tables t\n" +
+                    "LEFT JOIN sys.columns c ON (t.object_id = c.object_id)\n" +
+                    "LEFT JOIN sys.index_columns ic ON (c.object_id = ic.object_id AND c.column_id = ic.column_id)\n" +
+                    "LEFT JOIN sys.indexes i ON (i.object_id = ic.object_id AND i.index_id = ic.index_id)\n" +
+                    "WHERE t.name = '" + table + "';\n",
+                cdcConnnection);
                 using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
                 {
                     while (sqlRd.Read())
                     {
                         colums.Add(sqlRd.GetString(0));
+                        if (sqlRd.GetBoolean(1) || sqlRd.GetBoolean(2))
+                        {
+                            uniqueColums.Add(sqlRd.GetString(0));
+                        }
+
                         if (sqlRd.GetBoolean(1))
                         {
-                            identityColums.Add(sqlRd.GetString(0));
+                            identityColumsUsed = true;
                         }
                     }
                 }
 
+                if (uniqueColums.Count == 0)
+                {
+                    throw new Exception("Could not find any unique colums on the table");
+                }
+
                 // Create the merge SQL statement
                 var merge_sql =
+                    // Get the start lns and the lsn from the CDC mark operation
                     "declare @start_lsn binary(10);\n" +
                     "declare @end_lsn binary(10);\n" + 
                     "set @start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CS/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CS/', @cdcstate) + 4) - CHARINDEX('/CS/', @cdcstate) - 4), 1));\n" +
                     "set @end_lsn = convert(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CE/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CE/', @cdcstate) + 4) - CHARINDEX('/CE/', @cdcstate) - 4), 1);\n" +
-					//"declare @table_start_lsn binary(10);\n" + 
-					//"set @table_start_lsn = (SELECT value FROM CDC_State WHERE name = " + table + ";)\n" +
-					//"if IFNULL(@table_start_lsn, 0) < @start_lsn BEGIN\n
-					//	set @start_lsn = @table_start_lsn;
-					//END\n
-					"declare @rowcount int;\n" +
+                    
+                    // Get the start lns and the lsn from the CDC mark operation
+                    "declare @tablecdcstate nvarchar(256);\n" +
+                    "set @tablecdcstate = (SELECT state FROM cdc_states WHERE name = 'CDC_State_" + table + "')\n" +
+                    "if @tablecdcstate IS NOT NULL BEGIN\n" +
+                        "declare @table_start_lsn binary(10);\n" +
+                        "set @table_start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4, CHARINDEX('/', @tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4) - CHARINDEX('/IR',@tablecdcstate) - 4), 1));\n" +
+                        "if @table_start_lsn < @start_lsn BEGIN\n" +
+                            "set @start_lsn = @table_start_lsn;\n" +
+                        "END\n" +
+                    "END;\n" +
+                    
+                    // Create Merge statement
+                    "declare @rowcount int;\n" +
                     "set @rowcount = 0;\n" +
                     "IF @end_lsn > @start_lsn BEGIN\n" +
-                        "SET IDENTITY_INSERT [dbo].[" + table + "] ON;\n" +
+                        (identityColumsUsed ? "SET IDENTITY_INSERT [dbo].[" + table + "] ON;\n": "") +
                         "MERGE [dbo].[" + table + "] AS D\n" +
-                        "USING " + cdcdatabase + ".cdc.fn_cdc_get_net_changes_Test1(@start_lsn, @end_lsn, 'all with merge') AS S\n" +
-                        "ON (" + String.Join(" AND ", identityColums.Select(s => "D." + s + " = " + "S." + s)) + ")\n" +
+                        "USING " + cdcdatabase + ".cdc.fn_cdc_get_net_changes_" + cdctables[table] + "(@start_lsn, @end_lsn, 'all with merge') AS S\n" +
+                        "ON (" + String.Join(" AND ", uniqueColums.Select(s => "D." + s + " = " + "S." + s)) + ")\n" +
                         // Insert
                         "WHEN NOT MATCHED BY TARGET AND __$operation = 5\n" +
                             "THEN INSERT (" + String.Join(", ", colums) + ") VALUES(" + String.Join(", ", colums.Select(s => "S." + s)) + ")\n" +
                         // Update
                         "WHEN MATCHED AND __$operation = 5\n" +
-                            "THEN UPDATE SET " + String.Join(", ", colums.Where(s => !identityColums.Contains(s)).Select(s => "D." + s + " = S." + s)) + "\n" +
+                            "THEN UPDATE SET " + String.Join(", ", colums.Where(s => !uniqueColums.Contains(s)).Select(s => "D." + s + " = S." + s)) + "\n" +
                         // Delete
                         "WHEN MATCHED AND __$operation = 1\n" +
                             "THEN DELETE\n" +
                         ";\n" +
                         "set @rowcount = @@ROWCOUNT;\n" +
-                        "SET IDENTITY_INSERT [dbo].[" + table + "] OFF;\n" +
-						//"DELETE FROM CDC_State WHERE name = " + table + ";)\n" +
+                        (identityColumsUsed ? "SET IDENTITY_INSERT [dbo].[" + table + "] OFF;\n" : "") +
+                        "DELETE FROM cdc_states WHERE name = 'CDC_State_" + table + "';\n" +
                     "END\n" +
+                    "INSERT INTO cdc_status ([name], [rowcount]) VALUES('" + table + "',@rowcount)\n" +
                     "SELECT @rowcount as RowsUpdated;\n";
 
                 // Add variables
@@ -189,6 +231,8 @@ namespace SQLServerCDCSync
             (package.PrecedenceConstraints.Add((Executable)cdcControlTaskGetRange, (Executable)sequenceContainer)).Value = DTSExecResult.Success;
             (package.PrecedenceConstraints.Add((Executable)sequenceContainer, (Executable)cdcControlTaskMarkRange)).Value = DTSExecResult.Success;
 
+            package.ProtectionLevel = DTSProtectionLevel.EncryptAllWithPassword;
+            package.PackagePassword = "Qwerty1234";
             app.SaveToXml(filename, package, null);
         }
 
@@ -249,10 +293,36 @@ namespace SQLServerCDCSync
             createCDCStateTable.Name = "Create CDC state table if it does not exist";
             createCDCStateTable.Properties["Connection"].SetValue(createCDCStateTable, destinationManager.ID);
             createCDCStateTable.Properties["SqlStatementSource"].SetValue(createCDCStateTable,
-                "IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='cdc_states' and xtype='U') BEGIN " +
-                    "CREATE TABLE [dbo].[cdc_states] ([name] [nvarchar](256) NOT NULL, [state] [nvarchar](256) NOT NULL) ON [PRIMARY];" +
-                    "CREATE UNIQUE NONCLUSTERED INDEX [cdc_states_name] ON [dbo].[cdc_states] ( [name] ASC ) WITH (PAD_INDEX  = OFF) ON [PRIMARY];" +
+                "IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='cdc_states' and xtype='U') BEGIN\n" +
+                    "CREATE TABLE [dbo].[cdc_states] ([name] [nvarchar](256) NOT NULL, [state] [nvarchar](256) NOT NULL) ON [PRIMARY];\n" +
+                    "CREATE UNIQUE NONCLUSTERED INDEX [cdc_states_name] ON [dbo].[cdc_states] ( [name] ASC ) WITH (PAD_INDEX  = OFF) ON [PRIMARY];\n" +
                 "END;"
+            );
+
+            // Add CDC State Table
+            TaskHost createCDCMergeStatusTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
+            createCDCMergeStatusTable.Name = "Create CDC status table if it does not exist";
+            createCDCMergeStatusTable.Properties["Connection"].SetValue(createCDCMergeStatusTable, destinationManager.ID);
+            createCDCMergeStatusTable.Properties["SqlStatementSource"].SetValue(createCDCMergeStatusTable,
+                "IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='cdc_status' and xtype='U') BEGIN\n" +
+                    "CREATE TABLE [dbo].[cdc_status] (" + 
+                        "[id] [int] IDENTITY(1,1) NOT NULL, " + 
+                        "[name] [nvarchar](256) NOT NULL, " + 
+                        "[rowcount] [int] NOT NULL, " + 
+                        "[created] [datetime] default CURRENT_TIMESTAMP, " +
+                    "CONSTRAINT [PK_cdc_status] PRIMARY KEY CLUSTERED ([id] ASC) ON [PRIMARY]) ON [PRIMARY];\n" +
+                "END;"
+            );
+
+            // Copy CDC State variable from the first table if it does not exists
+            TaskHost copyCDCState = package.Executables.Add("STOCK:SQLTask") as TaskHost;
+            copyCDCState.Name = "Copy the CDC State of the first table to start if the CDC_State does not exist";
+            copyCDCState.Properties["Connection"].SetValue(copyCDCState, destinationManager.ID);
+            copyCDCState.Properties["SqlStatementSource"].SetValue(copyCDCState,
+                "IF NOT EXISTS (SELECT TOP 1 state FROM cdc_states WHERE name = 'CDC_State') BEGIN\n" +
+                   "INSERT INTO cdc_states(name, state)\n" +
+                   "SELECT TOP 1 'CDC_State' name, state FROM cdc_states ORDER BY state ASC\n" +
+                "END;\n"
             );
 
             foreach (var table in tables)
@@ -298,9 +368,11 @@ namespace SQLServerCDCSync
 
                 // Configure precedence
                 (package.PrecedenceConstraints.Add((Executable)createCDCStateTable, (Executable)createDestinationTable)).Value = DTSExecResult.Success;
+                (package.PrecedenceConstraints.Add((Executable)createCDCMergeStatusTable, (Executable)createDestinationTable)).Value = DTSExecResult.Success;
                 (package.PrecedenceConstraints.Add((Executable)createDestinationTable, (Executable)cdcMarkStartInitialLoad)).Value = DTSExecResult.Success;
                 (package.PrecedenceConstraints.Add((Executable)cdcMarkStartInitialLoad, (Executable)dataFlowTask)).Value = DTSExecResult.Success;
                 (package.PrecedenceConstraints.Add((Executable)dataFlowTask, (Executable)cdcMarkEndInitialLoad)).Value = DTSExecResult.Success;
+                (package.PrecedenceConstraints.Add((Executable)cdcMarkEndInitialLoad, (Executable)copyCDCState)).Value = DTSExecResult.Success;
 
                 // Configure the source
                 IDTSComponentMetaData100 adonetsrc = dataFlowTaskPipe.ComponentMetaDataCollection.New();
@@ -366,6 +438,9 @@ namespace SQLServerCDCSync
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = destinationManager.ID;
                 adonetdstinstance.SetComponentProperty("TableOrViewName",  table);
             }
+
+            /*package.ProtectionLevel = DTSProtectionLevel.EncryptAllWithPassword;
+            package.PackagePassword = "Qwerty1234"; */
 
             app.SaveToXml(filename, package, null);
         }

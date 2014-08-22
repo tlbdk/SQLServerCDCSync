@@ -14,7 +14,7 @@ namespace SQLServerCDCSync
             string destinationconn = "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSyncDestination;connection timeout=30";
             string cdcdatabase = "SQLServerCDCSync";
             string[] tables = new string[] { "Test1", "Test2" };
-
+            
             // Make sure external dependencies such as environment variables are initialized 
             SQLServerCDCSync.InitializeEnvironment();
 
