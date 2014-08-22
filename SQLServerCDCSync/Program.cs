@@ -10,6 +10,8 @@ namespace SQLServerCDCSync
     {
         static void Main(string[] args)
         {
+            // http://www.codeproject.com/Articles/547311/ProgrammaticallyplusCreateplusandplusDeployplusSSI
+
             string sourceconn = "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSync;connection timeout=30";
             string destinationconn = "user id=sa;password=Qwerty1234;server=localhost;Trusted_Connection=yes;database=SQLServerCDCSyncDestination;connection timeout=30";
             string cdcdatabase = "SQLServerCDCSync";
