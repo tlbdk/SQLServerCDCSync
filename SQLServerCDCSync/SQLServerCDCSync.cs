@@ -299,7 +299,7 @@ namespace SQLServerCDCSync
                 "END;"
             );
 
-            // Add CDC State Table
+            // Add CDC status Table
             TaskHost createCDCMergeStatusTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
             createCDCMergeStatusTable.Name = "Create CDC status table if it does not exist";
             createCDCMergeStatusTable.Properties["Connection"].SetValue(createCDCMergeStatusTable, destinationManager.ID);
@@ -336,6 +336,8 @@ namespace SQLServerCDCSync
                 createDestinationTable.Properties["Connection"].SetValue(createDestinationTable, destinationManager.ID);
                 createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, String.Format("SELECT * INTO [dbo].{0} FROM [{1}].{2} WHERE 1 = 2;", table, cdcdatabase, cdctables[table]));
 
+				// TODO: Create a index from the primary key
+				
                 // Add CDC Initial load start
                 TaskHost cdcMarkStartInitialLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
                 cdcMarkStartInitialLoad.Name = "Mark initial load start for table " + table;
