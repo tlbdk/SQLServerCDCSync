@@ -10,7 +10,6 @@ using System.Globalization;
 using System.Data.SqlClient;
 using Attunity.SqlServer.CDCControlTask;
 using Microsoft.SqlServer.Dts.Tasks.ExecuteSQLTask;
-using System.Data.OracleClient;
 
 // Links : EzAPI
 // http://social.msdn.microsoft.com/Forums/sqlserver/en-US/eb8b10bc-963c-4d36-8ea2-6c3ebbc20411/copying-600-tables-in-ssis-how-to?forum=sqlintegrationservices
@@ -49,13 +48,11 @@ namespace SQLServerCDCSync
             }
         }
 
-        public static void GenerateMergeLoadSSISPackage(string filename, string destinationconn, string cdcdatabase, string[] tables)
+        public static Package GenerateMergeLoadSSISPackage(string destinationconn, string cdcdatabase, string[] tables)
         {
             Application app = new Application();
             Package package = new Package();
 
-            package.Name = "CDC Merge Load Package for tables " + String.Join(", ", tables);
-            
             // Add connection managers
             ConnectionManager destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
             destinationManager.ConnectionString = destinationconn;
@@ -63,6 +60,7 @@ namespace SQLServerCDCSync
             
             // Build the CDC connection string
             var cdcconn = (new System.Data.SqlClient.SqlConnectionStringBuilder(destinationconn));
+            package.Name = "CDC Merge Load Package for " + cdcconn.InitialCatalog;
             cdcconn.InitialCatalog = cdcdatabase;
             ConnectionManager cdcManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
             cdcManager.ConnectionString = cdcconn.ConnectionString;
@@ -107,52 +105,13 @@ namespace SQLServerCDCSync
             cdcConnnection.Open();
 
             // Get list of CDC tables
-            var cdctables = new Dictionary<String, String>();
-            SqlCommand sqlcmdtables = new System.Data.SqlClient.SqlCommand(
-                "SELECT s.name, t.name " +
-                "FROM sys.tables t INNER JOIN sys.schemas s ON (t.schema_id = s.schema_id) " +
-                "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1;", cdcConnnection);
-            using (SqlDataReader sqlRd = sqlcmdtables.ExecuteReader())
-            {
-                while (sqlRd.Read())
-                {
-                    cdctables[sqlRd.GetString(1)] = sqlRd.GetString(0) + "_" + sqlRd.GetString(1) + "";
-                }
-            }
+            var cdctables = GetSQLTableList(cdcConnnection, "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1");
 
             foreach (var table in tables)
-            {
-                var uniqueColums = new HashSet<String>();
-                var colums = new List<string>();
-                var identityColumsUsed = false;
-                
-                // Get Colums from database
-                SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand(
-                    "SELECT c.name, is_identity, ISNULL(i.is_unique, 0)\n" +
-                    "FROM sys.tables t\n" +
-                    "LEFT JOIN sys.columns c ON (t.object_id = c.object_id)\n" +
-                    "LEFT JOIN sys.index_columns ic ON (c.object_id = ic.object_id AND c.column_id = ic.column_id)\n" +
-                    "LEFT JOIN sys.indexes i ON (i.object_id = ic.object_id AND i.index_id = ic.index_id)\n" +
-                    "WHERE t.name = '" + table + "';\n",
-                cdcConnnection);
-                using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
-                {
-                    while (sqlRd.Read())
-                    {
-                        colums.Add(sqlRd.GetString(0));
-                        if (sqlRd.GetBoolean(1) || sqlRd.GetBoolean(2))
-                        {
-                            uniqueColums.Add(sqlRd.GetString(0));
-                        }
+            {   
+                var tinfo = new SQLTableInfo(cdcConnnection, table);
 
-                        if (sqlRd.GetBoolean(1))
-                        {
-                            identityColumsUsed = true;
-                        }
-                    }
-                }
-
-                if (uniqueColums.Count == 0)
+                if (tinfo.UniqueColums.Count == 0)
                 {
                     throw new Exception("Could not find any unique colums on the table");
                 }
@@ -171,34 +130,36 @@ namespace SQLServerCDCSync
                     "if @tablecdcstate IS NOT NULL BEGIN\n" +
                         "declare @table_start_lsn binary(10);\n" +
                         "set @table_start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4, CHARINDEX('/', @tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4) - CHARINDEX('/IR',@tablecdcstate) - 4), 1));\n" +
-                        "if @table_start_lsn < @start_lsn BEGIN\n" +
+                        //"if @table_start_lsn < @start_lsn BEGIN\n" +  // Always use table start if we have it
                             "set @start_lsn = @table_start_lsn;\n" +
-                        "END\n" +
+                        //"END\n" +
                     "END;\n" +
-                    
+
                     // Create Merge statement
-                    "declare @rowcount int;\n" +
-                    "set @rowcount = 0;\n" +
+                    "DECLARE @rowcount int;\n" +
+                    "DECLARE @t1 DATETIME;\n" +
+                    "SET @rowcount = 0;\n" +
+                    "SET @t1 = GETDATE();\n" + 
                     "IF @end_lsn > @start_lsn BEGIN\n" +
-                        (identityColumsUsed ? "SET IDENTITY_INSERT [dbo].[" + table + "] ON;\n": "") +
+                        (tinfo.IdentityColumsUsed ? "SET IDENTITY_INSERT [dbo].[" + table + "] ON;\n" : "") +
                         "MERGE [dbo].[" + table + "] AS D\n" +
-                        "USING " + cdcdatabase + ".cdc.fn_cdc_get_net_changes_" + cdctables[table] + "(@start_lsn, @end_lsn, 'all with merge') AS S\n" +
-                        "ON (" + String.Join(" AND ", uniqueColums.Select(s => "D." + s + " = " + "S." + s)) + ")\n" +
+                        "USING " + cdcdatabase + ".cdc.fn_cdc_get_net_changes_" + cdctables[table].Replace('.', '_') + "(@start_lsn, @end_lsn, 'all with merge') AS S\n" +
+                        "ON (" + String.Join(" AND ", tinfo.UniqueColums.Select(s => "D." + s + " = " + "S." + s)) + ")\n" +
                         // Insert
                         "WHEN NOT MATCHED BY TARGET AND __$operation = 5\n" +
-                            "THEN INSERT (" + String.Join(", ", colums) + ") VALUES(" + String.Join(", ", colums.Select(s => "S." + s)) + ")\n" +
+                            "THEN INSERT (" + String.Join(", ", tinfo.Colums) + ") VALUES(" + String.Join(", ", tinfo.Colums.Select(s => "S." + s)) + ")\n" +
                         // Update
                         "WHEN MATCHED AND __$operation = 5\n" +
-                            "THEN UPDATE SET " + String.Join(", ", colums.Where(s => !uniqueColums.Contains(s)).Select(s => "D." + s + " = S." + s)) + "\n" +
+                            "THEN UPDATE SET " + String.Join(", ", tinfo.Colums.Where(s => !tinfo.UniqueColums.Contains(s)).Select(s => "D." + s + " = S." + s)) + "\n" +
                         // Delete
                         "WHEN MATCHED AND __$operation = 1\n" +
                             "THEN DELETE\n" +
                         ";\n" +
                         "set @rowcount = @@ROWCOUNT;\n" +
-                        (identityColumsUsed ? "SET IDENTITY_INSERT [dbo].[" + table + "] OFF;\n" : "") +
+                        (tinfo.IdentityColumsUsed ? "SET IDENTITY_INSERT [dbo].[" + table + "] OFF;\n" : "") +
                         "DELETE FROM cdc_states WHERE name = 'CDC_State_" + table + "';\n" +
                     "END\n" +
-                    "INSERT INTO cdc_status ([name], [rowcount]) VALUES('" + table + "',@rowcount)\n" +
+                    "INSERT INTO cdc_status ([name], [rowcount], [elapsed]) VALUES('" + table + "',@rowcount, DATEDIFF(millisecond,@t1,GETDATE()))\n" +
                     "SELECT @rowcount as RowsUpdated;\n";
 
                 // Add variables
@@ -231,17 +192,13 @@ namespace SQLServerCDCSync
             (package.PrecedenceConstraints.Add((Executable)cdcControlTaskGetRange, (Executable)sequenceContainer)).Value = DTSExecResult.Success;
             (package.PrecedenceConstraints.Add((Executable)sequenceContainer, (Executable)cdcControlTaskMarkRange)).Value = DTSExecResult.Success;
 
-            package.ProtectionLevel = DTSProtectionLevel.EncryptAllWithPassword;
-            package.PackagePassword = "Qwerty1234";
-            app.SaveToXml(filename, package, null);
+            return package;
         }
 
-        public static void GenerateInitialLoadSSISPackage(string filename, string sourceprovider, string sourceconn, string destinationconn, string cdcdatabase, string[] tables)
+        public static Package GenerateInitialLoadSSISPackage(string sourceprovider, string sourceconn, string destinationconn, string cdcdatabase, string[] tables)
         {
             Application app = new Application();
             Package package = new Package();
-
-            package.Name = "CDC Initial Load Package for tables " + String.Join(", ", tables);
 
             ConnectionManager sourceManager;
             ConnectionManager destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
@@ -250,6 +207,7 @@ namespace SQLServerCDCSync
 
             // Build the CDC connection string
             var cdcconn = (new System.Data.SqlClient.SqlConnectionStringBuilder(destinationconn));
+            package.Name = "CDC Initial Load Package for " + cdcconn.InitialCatalog;
             cdcconn.InitialCatalog = cdcdatabase;
             ConnectionManager cdcManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
             cdcManager.ConnectionString = cdcconn.ConnectionString;
@@ -258,34 +216,32 @@ namespace SQLServerCDCSync
             // Get CDC tables from database
             SqlConnection cdcConnnection = new SqlConnection(cdcconn.ConnectionString);
             cdcConnnection.Open();
-            var cdctables = new Dictionary<String,String>();
-            SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand(
-                "SELECT s.name, t.name " +
-                "FROM sys.tables t INNER JOIN sys.schemas s ON (t.schema_id = s.schema_id) " +
-                "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1;", cdcConnnection);
-            using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
-            {
-                while (sqlRd.Read())
-                {
-                    cdctables[sqlRd.GetString(1)] =  sqlRd.GetString(0) + "." + sqlRd.GetString(1) + "";
-                }
-            }
-
+            var cdctables = GetSQLTableList(cdcConnnection, "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1");
+            
             // Source connection managers
             if (sourceprovider == "System.Data.SqlClient")
             {                
                 sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
+                sourceManager.ConnectionString = sourceconn;
             }
             else if (sourceprovider == "System.Data.OracleClient")
             {
-                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(OracleConnection).AssemblyQualifiedName));
+
+                #pragma warning disable 612, 618 // Disable the Obsolete warning for the OracleClient component
+                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(System.Data.OracleClient.OracleConnection).AssemblyQualifiedName));
+                #pragma warning restore 612, 618
+                sourceManager.ConnectionString = sourceconn;
+            }
+            else if (sourceprovider == "Oracle.ManagedDataAccess.Client")
+            {
+                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(Oracle.ManagedDataAccess.Client.OracleConnection).AssemblyQualifiedName));
+                sourceManager.ConnectionString = sourceconn;
             }
             else
             {
                 throw new Exception("Unknown connection provider");
             }
 
-            sourceManager.ConnectionString = sourceconn;
             sourceManager.Name = "Source Connection";
            
             // Add CDC State Table
@@ -308,7 +264,8 @@ namespace SQLServerCDCSync
                     "CREATE TABLE [dbo].[cdc_status] (" + 
                         "[id] [int] IDENTITY(1,1) NOT NULL, " + 
                         "[name] [nvarchar](256) NOT NULL, " + 
-                        "[rowcount] [int] NOT NULL, " + 
+                        "[rowcount] [int] NOT NULL, " +
+                        "[elapsed] [int] NOT NULL, " +
                         "[created] [datetime] default CURRENT_TIMESTAMP, " +
                     "CONSTRAINT [PK_cdc_status] PRIMARY KEY CLUSTERED ([id] ASC) ON [PRIMARY]) ON [PRIMARY];\n" +
                 "END;"
@@ -327,6 +284,8 @@ namespace SQLServerCDCSync
 
             foreach (var table in tables)
             {
+                var tinfo = new SQLTableInfo(cdcConnnection, table);
+
                 // Add variables
                 package.Variables.Add("CDC_State_" + table, false, "User", "");
 
@@ -334,7 +293,10 @@ namespace SQLServerCDCSync
                 TaskHost createDestinationTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
                 createDestinationTable.Name = "Create destination " + table + " from source table definiation";
                 createDestinationTable.Properties["Connection"].SetValue(createDestinationTable, destinationManager.ID);
-                createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, String.Format("SELECT * INTO [dbo].{0} FROM [{1}].{2} WHERE 1 = 2;", table, cdcdatabase, cdctables[table]));
+                createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, 
+                    String.Format("SELECT * INTO [dbo].{0} FROM [{1}].{2} WHERE 1 = 2;\n", table, cdcdatabase, cdctables[table]) +
+                    tinfo.CreatePrimaryKeySQL ?? ""
+                );
 
                 // Add CDC Initial load start
                 TaskHost cdcMarkStartInitialLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
@@ -419,6 +381,10 @@ namespace SQLServerCDCSync
                 // Hook up the external columns
                 foreach (IDTSOutputColumn100 outputCol in sourceColumns)
                 {
+                    // Ignore all errors
+                    outputCol.ErrorRowDisposition = DTSRowDisposition.RD_IgnoreFailure;
+                    outputCol.TruncationRowDisposition = DTSRowDisposition.RD_IgnoreFailure; 
+
                     // Get the external column id
                     IDTSExternalMetadataColumn100 extCol = (IDTSExternalMetadataColumn100)destExtCols[outputCol.Name];
                     if (extCol != null)
@@ -439,10 +405,103 @@ namespace SQLServerCDCSync
                 adonetdstinstance.SetComponentProperty("TableOrViewName",  table);
             }
 
-            /*package.ProtectionLevel = DTSProtectionLevel.EncryptAllWithPassword;
-            package.PackagePassword = "Qwerty1234"; */
+            return package;
+        }
+
+        public static void SavePackageToXML(Package package, string filename, string password = null)
+        {
+            Application app = new Application();
+            if (password != null)
+            {
+                package.ProtectionLevel = DTSProtectionLevel.EncryptAllWithPassword;
+                package.PackagePassword = password;
+            }
+
+            package.MaxConcurrentExecutables = 10;
 
             app.SaveToXml(filename, package, null);
+        }
+
+        public static void SavePackageToSQLServer(Package package, string connectionString, bool overwrite = false)
+        {
+            var conn = (new System.Data.SqlClient.SqlConnectionStringBuilder(connectionString));
+            Application app = new Application();
+            package.ProtectionLevel = DTSProtectionLevel.ServerStorage;
+            if(!app.ExistsOnSqlServer(package.Name, conn.DataSource, conn.UserID, conn.Password) || overwrite)
+            {
+                app.SaveToSqlServer(package, null, conn.DataSource, conn.UserID, conn.Password);
+            }
+        }
+
+        private static Dictionary<String, String> GetSQLTableList(SqlConnection connnection, string whereclause = "")
+        {
+            var tables = new Dictionary<String, String>();
+            SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand(
+                "SELECT s.name, t.name " +
+                "FROM sys.tables t INNER JOIN sys.schemas s ON (t.schema_id = s.schema_id) " +
+                whereclause, connnection);
+            using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
+            {
+                while (sqlRd.Read())
+                {
+                    tables[sqlRd.GetString(1)] = sqlRd.GetString(0) + "." + sqlRd.GetString(1) + "";
+                }
+            }
+            return tables;
+        }
+
+        // Utility Classes
+        private class SQLTableInfo
+        {
+            public HashSet<String> UniqueColums = new HashSet<String>();
+            public String CreatePrimaryKeySQL = null;
+            public List<string> Colums = new List<string>();
+            public bool IdentityColumsUsed = false;
+
+            public SQLTableInfo(SqlConnection connnection, string table)
+            {
+                // Get Colums from database
+                SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand(
+                    "SELECT c.name, is_identity, ISNULL(i.is_unique, 0), ISNULL(i.is_primary_key, 0), ISNULL(ic.is_descending_key, 0)\n" +
+                    "FROM sys.tables t\n" +
+                    "LEFT JOIN sys.columns c ON (t.object_id = c.object_id)\n" +
+                    "LEFT JOIN sys.index_columns ic ON (c.object_id = ic.object_id AND c.column_id = ic.column_id)\n" +
+                    "LEFT JOIN sys.indexes i ON (i.object_id = ic.object_id AND i.index_id = ic.index_id)\n" +
+                    "WHERE t.name = '" + table + "'\n" +
+                    "ORDER BY ic.index_id, ic.index_column_id",
+                connnection);
+                using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
+                {
+                    while (sqlRd.Read())
+                    {
+                        Colums.Add(sqlRd.GetString(0));
+                        if (sqlRd.GetBoolean(1) || sqlRd.GetBoolean(2))
+                        {
+                            UniqueColums.Add(sqlRd.GetString(0));
+                        }
+
+                        if (sqlRd.GetBoolean(1))
+                        {
+                            IdentityColumsUsed = true;
+                        }
+
+                        if(sqlRd.GetBoolean(3))
+                        {
+                            var key = sqlRd.GetBoolean(4) ? sqlRd.GetString(0) + " DESC" : sqlRd.GetString(0);
+        
+                            // Init string if null
+                            CreatePrimaryKeySQL += CreatePrimaryKeySQL == null 
+                              ? "ALTER TABLE " + table + " ADD CONSTRAINT PK_" + table + " " + "PRIMARY KEY CLUSTERED (" + key 
+                              : "," + key;
+                        }
+                    }
+                }
+
+                if (CreatePrimaryKeySQL != null)
+                {
+                    CreatePrimaryKeySQL += ")";
+                }
+            }
         }
     }
 }

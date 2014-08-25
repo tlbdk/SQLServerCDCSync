@@ -174,3 +174,4 @@ UpgradeLog*.htm
 FakesAssemblies/
 SQLServerCDCSync.SSISSample/InitialLoadTest1.dtsx
 /SQLServerCDCSync.SSISSample/MergeLoadTest1.dtsx
+/SQLServerCDCSync/App.config
