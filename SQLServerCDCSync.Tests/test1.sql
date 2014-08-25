@@ -17,6 +17,8 @@ CREATE TABLE [dbo].[Test1](
     [FirstName] [nvarchar](max) NOT NULL,
     [LastName] [nvarchar](max) NOT NULL,
 	[TestId] [int] NOT NULL,
+	[CreatedTime] [datetime],
+	[UpdatedTime] [datetime2],
 CONSTRAINT [PK_Test1] PRIMARY KEY CLUSTERED ([Id] ASC) ON [PRIMARY]) ON [PRIMARY];
 
 -- Enable CDC on Table
@@ -63,6 +65,8 @@ CREATE TABLE [dbo].[Test2](
     [FirstName] [nvarchar](max) NOT NULL,
     [LastName] [nvarchar](max) NOT NULL,
 	[TestId] [int] NOT NULL,
+	[CreatedTime] [datetime],
+	[UpdatedTime] [datetime2],
 CONSTRAINT [PK_Test2] PRIMARY KEY CLUSTERED ([Id] ASC) ON [PRIMARY]) ON [PRIMARY];
 
 -- Enable CDC on Table
