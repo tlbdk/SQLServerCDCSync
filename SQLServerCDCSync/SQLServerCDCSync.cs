@@ -197,6 +197,7 @@ namespace SQLServerCDCSync
 
         public static Package GenerateInitialLoadSSISPackage(string sourceprovider, string sourceconn, string destinationconn, string cdcdatabase, string[] tables)
         {
+            //TODO: Make it optional to use OleDB as this seems a lot faster
             Application app = new Application();
             Package package = new Package();
 
@@ -317,6 +318,8 @@ namespace SQLServerCDCSync
                 dataFlowTask.Name = "Copy source to destination for " + table;
                 dataFlowTask.DelayValidation = true;
                 MainPipe dataFlowTaskPipe = (MainPipe)dataFlowTask.InnerObject;
+                //dataFlowTaskPipe.DefaultBufferMaxRows = 1000;
+                dataFlowTaskPipe.DefaultBufferSize *= 10;
 
                 // Add CDC Initial load end
                 TaskHost cdcMarkEndInitialLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
@@ -347,6 +350,7 @@ namespace SQLServerCDCSync
                 adonetsrcinstance.ProvideComponentProperties();
                 adonetsrcinstance.SetComponentProperty("AccessMode", 0);
                 adonetsrcinstance.SetComponentProperty("TableOrViewName", table);
+                adonetsrcinstance.SetComponentProperty("CommandTimeout", 300);
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(sourceManager);
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManagerID = sourceManager.ID;
                 adonetsrcinstance.AcquireConnections(null);
@@ -361,6 +365,7 @@ namespace SQLServerCDCSync
                 IDTSDesigntimeComponent100 adonetdstinstance = adonetdst.Instantiate();
                 adonetdstinstance.ProvideComponentProperties();
                 adonetdstinstance.SetComponentProperty("TableOrViewName", cdctables[table]); // TODO
+                adonetdstinstance.SetComponentProperty("CommandTimeout", 300);
                 // Point to the CDC tables when generating the metadata
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(cdcManager);
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = cdcManager.ID;
@@ -419,7 +424,7 @@ namespace SQLServerCDCSync
                 package.PackagePassword = password;
             }
 
-            package.MaxConcurrentExecutables = 10;
+            package.MaxConcurrentExecutables = 2;
 
             app.SaveToXml(filename, package, null);
         }
@@ -429,6 +434,9 @@ namespace SQLServerCDCSync
             var conn = (new System.Data.SqlClient.SqlConnectionStringBuilder(connectionString));
             Application app = new Application();
             package.ProtectionLevel = DTSProtectionLevel.ServerStorage;
+
+            package.MaxConcurrentExecutables = 2;
+
             if(!app.ExistsOnSqlServer(package.Name, conn.DataSource, conn.UserID, conn.Password) || overwrite)
             {
                 app.SaveToSqlServer(package, null, conn.DataSource, conn.UserID, conn.Password);

@@ -48,13 +48,13 @@ namespace SQLServerCDCSync
                 destinationconn.ConnectionString, cdcdatabase, tables
             );
 
-            /* SQLServerCDCSync.SavePackageToXML(initpackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\InitialLoadTest1.dtsx", password);
-            SQLServerCDCSync.SavePackageToXML(mergepackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\MergeLoadTest1.dtsx", password); */
+            SQLServerCDCSync.SavePackageToXML(initpackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\InitialLoadTest1.dtsx", password);
+            SQLServerCDCSync.SavePackageToXML(mergepackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\MergeLoadTest1.dtsx", password); 
             
             if(pgkuploadconn != null)
             {
-                SQLServerCDCSync.SavePackageToSQLServer(initpackage, pgkuploadconn.ConnectionString);
-                SQLServerCDCSync.SavePackageToSQLServer(mergepackage, pgkuploadconn.ConnectionString);
+                //SQLServerCDCSync.SavePackageToSQLServer(initpackage, pgkuploadconn.ConnectionString, true);
+                //SQLServerCDCSync.SavePackageToSQLServer(mergepackage, pgkuploadconn.ConnectionString, true);
             }
             
         }
