@@ -174,7 +174,7 @@ namespace SQLServerCDCSync
                 executeMergeSQL.Properties["Connection"].SetValue(executeMergeSQL, destinationManager.ID);
                 executeMergeSQL.Properties["SqlStatementSource"].SetValue(executeMergeSQL, merge_sql);
                 var executeMergeSQLTask = executeMergeSQL.InnerObject as ExecuteSQLTask;
-                executeMergeSQLTask.ResultSetType = ResultSetType.ResultSetType_SingleRow;
+                
                 // Add input parameter binding
                 executeMergeSQLTask.ParameterBindings.Add();
                 IDTSParameterBinding parameterBinding = executeMergeSQLTask.ParameterBindings.GetBinding(0);
@@ -183,8 +183,10 @@ namespace SQLServerCDCSync
                 parameterBinding.DataType = 16;
                 parameterBinding.ParameterName = "@cdcstate";
                 parameterBinding.ParameterSize = -1;
+
                 // Add result set binding, map the id column to variable
                 executeMergeSQLTask.ResultSetBindings.Add();
+                executeMergeSQLTask.ResultSetType = ResultSetType.ResultSetType_SingleRow;
                 IDTSResultBinding resultBinding = executeMergeSQLTask.ResultSetBindings.GetBinding(0);
                 resultBinding.ResultName = "0";
                 resultBinding.DtsVariableName = "User::RowsUpdated_" + table;
@@ -293,7 +295,7 @@ namespace SQLServerCDCSync
                         "[elapsed] [int] NOT NULL, " +
                         "[created] [datetime] default CURRENT_TIMESTAMP, " +
                     "CONSTRAINT [PK_cdc_status] PRIMARY KEY CLUSTERED ([id] ASC) ON [PRIMARY]) ON [PRIMARY];\n" +
-                "END;"
+                "END\n"
             );
 
             // Copy CDC State variable from the first table if it does not exists
@@ -319,12 +321,32 @@ namespace SQLServerCDCSync
                 createDestinationTable.Name = "Create destination " + table + " from source table definiation";
                 createDestinationTable.Properties["Connection"].SetValue(createDestinationTable, destinationManager.ID);
                 createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, 
-                    String.Format("SELECT * INTO [dbo].{0} FROM [{1}].{2} WHERE 1 = 2;\n", table, cdcdatabase, cdctables[table]) +
-                    tinfo.CreatePrimaryKeySQL ?? "" // TODO: Move index creation to after table creation
+                    "IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='" + table + "' and xtype='U') BEGIN\n" +
+                        "SELECT * INTO [dbo].["+table+"] FROM ["+cdcdatabase+"].[" + cdctables[table] + "] WHERE 1 = 2;\n" +
+                        "SELECT 'NOTEXISTS' AS Result;\n" +
+                    "END\n" +
+                    "ELSE BEGIN\n" +
+                        "SELECT 'EXISTS' AS Result;\n" +
+                    "END\n"
                 );
 
-				// TODO: Create a index from the primary key
-				
+                // Add result set binding for createDestinationTable
+                package.Variables.Add("Create" + table + "_Result", false, "User", "");
+                var createDestinationTableTask = createDestinationTable.InnerObject as ExecuteSQLTask;
+                createDestinationTableTask.ResultSetBindings.Add();
+                createDestinationTableTask.ResultSetType = ResultSetType.ResultSetType_SingleRow;
+                IDTSResultBinding resultBinding = createDestinationTableTask.ResultSetBindings.GetBinding(0);
+                resultBinding.ResultName = "0";
+                resultBinding.DtsVariableName = "User::Create" + table + "_Result";
+
+                // Create a index from the primary key
+                TaskHost createIndexes = package.Executables.Add("STOCK:SQLTask") as TaskHost;
+                createIndexes.Name = "Create indexes on destination table " + table ;
+                createIndexes.Properties["Connection"].SetValue(createIndexes, destinationManager.ID);
+                createIndexes.Properties["SqlStatementSource"].SetValue(createIndexes,
+                    tinfo.CreatePrimaryKeySQL // TODO: Move index creation to after table creation
+                );
+
                 // Add CDC Initial load start
                 TaskHost cdcMarkStartInitialLoad = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
                 cdcMarkStartInitialLoad.Name = "Mark initial load start for table " + table;
@@ -360,9 +382,14 @@ namespace SQLServerCDCSync
                 // Configure precedence
                 (package.PrecedenceConstraints.Add((Executable)createCDCStateTable, (Executable)createDestinationTable)).Value = DTSExecResult.Success;
                 (package.PrecedenceConstraints.Add((Executable)createCDCMergeStatusTable, (Executable)createDestinationTable)).Value = DTSExecResult.Success;
-                (package.PrecedenceConstraints.Add((Executable)createDestinationTable, (Executable)cdcMarkStartInitialLoad)).Value = DTSExecResult.Success;
+                var precedence = package.PrecedenceConstraints.Add((Executable)createDestinationTable, (Executable)cdcMarkStartInitialLoad);
+                precedence.Value = DTSExecResult.Success;
+                precedence.EvalOp = DTSPrecedenceEvalOp.ExpressionAndConstraint;
+                precedence.Expression = "@[User::Create" + table + "_Result] == \"NOTEXISTS\"";
+
                 (package.PrecedenceConstraints.Add((Executable)cdcMarkStartInitialLoad, (Executable)dataFlowTask)).Value = DTSExecResult.Success;
-                (package.PrecedenceConstraints.Add((Executable)dataFlowTask, (Executable)cdcMarkEndInitialLoad)).Value = DTSExecResult.Success;
+                (package.PrecedenceConstraints.Add((Executable)dataFlowTask, (Executable)createIndexes)).Value = DTSExecResult.Success;
+                (package.PrecedenceConstraints.Add((Executable)createIndexes, (Executable)cdcMarkEndInitialLoad)).Value = DTSExecResult.Success;
                 (package.PrecedenceConstraints.Add((Executable)cdcMarkEndInitialLoad, (Executable)copyCDCState)).Value = DTSExecResult.Success;
 
                 // Configure the source
@@ -391,6 +418,7 @@ namespace SQLServerCDCSync
                 adonetdstinstance.ProvideComponentProperties();
                 adonetdstinstance.SetComponentProperty("TableOrViewName", cdctables[table]); // TODO
                 adonetdstinstance.SetComponentProperty("CommandTimeout", 300);
+
                 // Point to the CDC tables when generating the metadata
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(cdcManager);
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = cdcManager.ID;
@@ -437,6 +465,9 @@ namespace SQLServerCDCSync
                 adonetdstinstance.SetComponentProperty("TableOrViewName",  table);
             }
 
+            // Limit the package to max 20 tables
+            package.MaxConcurrentExecutables = 20;
+
             return package;
         }
 
@@ -449,8 +480,6 @@ namespace SQLServerCDCSync
                 package.PackagePassword = password;
             }
 
-            package.MaxConcurrentExecutables = 2;
-
             app.SaveToXml(filename, package, null);
         }
 
@@ -459,9 +488,7 @@ namespace SQLServerCDCSync
             var conn = (new System.Data.SqlClient.SqlConnectionStringBuilder(connectionString));
             Application app = new Application();
             package.ProtectionLevel = DTSProtectionLevel.ServerStorage;
-
-            package.MaxConcurrentExecutables = 2;
-
+            
             if(!app.ExistsOnSqlServer(package.Name, conn.DataSource, conn.UserID, conn.Password) || overwrite)
             {
                 app.SaveToSqlServer(package, null, conn.DataSource, conn.UserID, conn.Password);
