@@ -322,7 +322,7 @@ namespace SQLServerCDCSync
                 createDestinationTable.Properties["Connection"].SetValue(createDestinationTable, destinationManager.ID);
                 createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, 
                     "IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='" + table + "' and xtype='U') BEGIN\n" +
-                        "SELECT * INTO [dbo].["+table+"] FROM ["+cdcdatabase+"].[" + cdctables[table] + "] WHERE 1 = 2;\n" +
+                        "SELECT * INTO [dbo].["+table+"] FROM ["+cdcdatabase+"]." + cdctables[table] + " WHERE 1 = 2;\n" +
                         "SELECT 'NOTEXISTS' AS Result;\n" +
                     "END\n" +
                     "ELSE BEGIN\n" +
