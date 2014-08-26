@@ -17,7 +17,7 @@ namespace SQLServerCDCSync
             var destinationconn = ConfigurationManager.ConnectionStrings["DestinationConnection"];
             var pgkuploadconn = ConfigurationManager.ConnectionStrings["PackageUploadConnection"];
             string cdcdatabase = ConfigurationManager.AppSettings["CDCDatabase"];
-            string[] tables = ConfigurationManager.AppSettings["Tables"].Split(',');
+            string[] tables = (ConfigurationManager.AppSettings["Tables"] ?? "").Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
             string password = ConfigurationManager.AppSettings["Password"];
 
 
@@ -53,8 +53,8 @@ namespace SQLServerCDCSync
             
             if(pgkuploadconn != null)
             {
-                //SQLServerCDCSync.SavePackageToSQLServer(initpackage, pgkuploadconn.ConnectionString, true);
-                //SQLServerCDCSync.SavePackageToSQLServer(mergepackage, pgkuploadconn.ConnectionString, true);
+                SQLServerCDCSync.SavePackageToSQLServer(initpackage, pgkuploadconn.ConnectionString, true);
+                SQLServerCDCSync.SavePackageToSQLServer(mergepackage, pgkuploadconn.ConnectionString, true);
             }
             
         }

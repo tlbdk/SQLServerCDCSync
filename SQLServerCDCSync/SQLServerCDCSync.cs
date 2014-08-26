@@ -81,7 +81,6 @@ namespace SQLServerCDCSync
             cdcControlTaskGetRange.Properties["StateName"].SetValue(cdcControlTaskGetRange, "CDC_State");
             cdcControlTaskGetRange.Properties["StateTable"].SetValue(cdcControlTaskGetRange, "[dbo].[cdc_states]");
             cdcControlTaskGetRange.DelayValidation = true;
-            //cdcControlTaskGetRange.TransactionOption = DTSTransactionOption.Required;
 
             // Add Mark CDC Processed Range
             TaskHost cdcControlTaskMarkRange = package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
@@ -94,20 +93,29 @@ namespace SQLServerCDCSync
             cdcControlTaskMarkRange.Properties["StateName"].SetValue(cdcControlTaskMarkRange, "CDC_State");
             cdcControlTaskMarkRange.Properties["StateTable"].SetValue(cdcControlTaskMarkRange, "[dbo].[cdc_states]");
             cdcControlTaskMarkRange.DelayValidation = true;
-            //cdcControlTaskMarkRange.TransactionOption = DTSTransactionOption.Required;
-
-            // Create a Sequence Container to make sure we have a transaction for all the merge operations
-            Sequence sequenceContainer = (Sequence)package.Executables.Add("STOCK:SEQUENCE");
-            sequenceContainer.FailPackageOnFailure = true;
-            sequenceContainer.FailParentOnFailure = true;
-            sequenceContainer.Name = "Sequence Container";
-            sequenceContainer.TransactionOption = DTSTransactionOption.Required;
-
+            
             SqlConnection cdcConnnection = new SqlConnection(cdcconn.ConnectionString);
             cdcConnnection.Open();
 
             // Get list of CDC tables
             var cdctables = GetSQLTableList(cdcConnnection, "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1");
+
+            if (tables.Length == 0)
+            {
+                tables = cdctables.Keys.ToArray();
+            }
+
+            var merge_sql =
+                "declare @cdcstart_lsn binary(10);\n" +
+                "declare @end_lsn binary(10);\n" +
+                "declare @start_lsn binary(10);\n" +
+                "declare @tablecdcstate nvarchar(256);\n" +
+                "declare @rowcount int;\n" +
+                "declare @t1 datetime;\n" +
+                // Get the start lns and the lsn from the CDC mark operation
+                "set @cdcstart_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CS/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CS/', @cdcstate) + 4) - CHARINDEX('/CS/', @cdcstate) - 4), 1));\n" +
+                "set @end_lsn = convert(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CE/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CE/', @cdcstate) + 4) - CHARINDEX('/CE/', @cdcstate) - 4), 1);\n" +
+                "set @start_lsn = @cdcstart_lsn;\n";
 
             foreach (var table in tables)
             {
@@ -119,41 +127,27 @@ namespace SQLServerCDCSync
                 }
 
                 // Create the merge SQL statement
-                var merge_sql =
-                    // Get the start lns and the lsn from the CDC mark operation
-                    "declare @start_lsn binary(10);\n" +
-                    "declare @end_lsn binary(10);\n" + 
-                    "set @start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CS/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CS/', @cdcstate) + 4) - CHARINDEX('/CS/', @cdcstate) - 4), 1));\n" +
-                    "set @end_lsn = convert(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CE/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CE/', @cdcstate) + 4) - CHARINDEX('/CE/', @cdcstate) - 4), 1);\n" +
-                    
-                    // Get the start lns and the lsn from the CDC mark operation
-                    "declare @tablecdcstate nvarchar(256);\n" +
-                    "set @tablecdcstate = (SELECT state FROM cdc_states WHERE name = 'CDC_State_" + table + "')\n" +
-                    "if @tablecdcstate IS NOT NULL BEGIN\n" +
-                        "declare @table_start_lsn binary(10);\n" +
-                        "set @table_start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4, CHARINDEX('/', @tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4) - CHARINDEX('/IR',@tablecdcstate) - 4), 1));\n" +
-                        //"if @table_start_lsn < @start_lsn BEGIN\n" +  // Always use table start if we have it
-                            "set @start_lsn = @table_start_lsn;\n" +
-                        //"END\n" +
-                    "END;\n" +
-
+                merge_sql +=
+                    // Get table specefic start_lsn if it has been set
+                    "set @tablecdcstate = (SELECT state FROM cdc_states WHERE name = 'CDC_State_" + table + "');\n" +
+                    "if @tablecdcstate IS NOT NULL AND @tablecdcstate LIKE 'ILEND%' BEGIN\n" +
+                        "set @start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4, CHARINDEX('/', @tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4) - CHARINDEX('/IR',@tablecdcstate) - 4), 1));\n" +
+                    "END\n" +
                     // Create Merge statement
-                    "DECLARE @rowcount int;\n" +
-                    "DECLARE @t1 DATETIME;\n" +
-                    "SET @rowcount = 0;\n" +
-                    "SET @t1 = GETDATE();\n" + 
+                    "set @rowcount = 0;\n" +
+                    "set @t1 = GETDATE();\n" +
                     "IF @end_lsn > @start_lsn BEGIN\n" +
                         (tinfo.IdentityColumsUsed ? "SET IDENTITY_INSERT [dbo].[" + table + "] ON;\n" : "") +
                         "MERGE [dbo].[" + table + "] AS D\n" +
                         "USING " + cdcdatabase + ".cdc.fn_cdc_get_net_changes_" + cdctables[table].Replace('.', '_') + "(@start_lsn, @end_lsn, 'all with merge') AS S\n" +
                         "ON (" + String.Join(" AND ", tinfo.UniqueColums.Select(s => "D." + s + " = " + "S." + s)) + ")\n" +
-                        // Insert
+                    // Insert
                         "WHEN NOT MATCHED BY TARGET AND __$operation = 5\n" +
                             "THEN INSERT (" + String.Join(", ", tinfo.Colums) + ") VALUES(" + String.Join(", ", tinfo.Colums.Select(s => "S." + s)) + ")\n" +
-                        // Update
+                    // Update
                         "WHEN MATCHED AND __$operation = 5\n" +
                             "THEN UPDATE SET " + String.Join(", ", tinfo.Colums.Where(s => !tinfo.UniqueColums.Contains(s)).Select(s => "D." + s + " = S." + s)) + "\n" +
-                        // Delete
+                    // Delete
                         "WHEN MATCHED AND __$operation = 1\n" +
                             "THEN DELETE\n" +
                         ";\n" +
@@ -161,40 +155,38 @@ namespace SQLServerCDCSync
                         (tinfo.IdentityColumsUsed ? "SET IDENTITY_INSERT [dbo].[" + table + "] OFF;\n" : "") +
                         "DELETE FROM cdc_states WHERE name = 'CDC_State_" + table + "';\n" +
                     "END\n" +
-                    "INSERT INTO cdc_status ([name], [rowcount], [elapsed]) VALUES('" + table + "',@rowcount, DATEDIFF(millisecond,@t1,GETDATE()))\n" +
-                    "SELECT @rowcount as RowsUpdated;\n";
-
-                // Add variables
-                package.Variables.Add("RowsUpdated_" + table, false, "User", "");
-
-                // Add Execute Merge Command
-                TaskHost executeMergeSQL = sequenceContainer.Executables.Add("STOCK:SQLTask") as TaskHost;
-                executeMergeSQL.Name = "Execute Merge Command for " + table;
-                executeMergeSQL.TransactionOption = DTSTransactionOption.Required;
-                executeMergeSQL.Properties["Connection"].SetValue(executeMergeSQL, destinationManager.ID);
-                executeMergeSQL.Properties["SqlStatementSource"].SetValue(executeMergeSQL, merge_sql);
-                var executeMergeSQLTask = executeMergeSQL.InnerObject as ExecuteSQLTask;
-                
-                // Add input parameter binding
-                executeMergeSQLTask.ParameterBindings.Add();
-                IDTSParameterBinding parameterBinding = executeMergeSQLTask.ParameterBindings.GetBinding(0);
-                parameterBinding.DtsVariableName = "CDC_State";
-                parameterBinding.ParameterDirection = ParameterDirections.Input;
-                parameterBinding.DataType = 16;
-                parameterBinding.ParameterName = "@cdcstate";
-                parameterBinding.ParameterSize = -1;
-
-                // Add result set binding, map the id column to variable
-                executeMergeSQLTask.ResultSetBindings.Add();
-                executeMergeSQLTask.ResultSetType = ResultSetType.ResultSetType_SingleRow;
-                IDTSResultBinding resultBinding = executeMergeSQLTask.ResultSetBindings.GetBinding(0);
-                resultBinding.ResultName = "0";
-                resultBinding.DtsVariableName = "User::RowsUpdated_" + table;
+                    "INSERT INTO cdc_status ([name], [rowcount], [elapsed]) VALUES('" + table + "',@rowcount, DATEDIFF(millisecond,@t1,GETDATE()))\n";                
             }
 
+            var merge_sql_transwrap =
+                "BEGIN TRY\n" +
+                "BEGIN TRANSACTION\n" +
+                    merge_sql +
+                    "COMMIT;\n" +
+                "END TRY\n" +
+                "BEGIN CATCH\n" +
+                    "ROLLBACK;\n" +
+                "END CATCH\n";
+
+            // Add Execute Merge Command
+            TaskHost executeMergeSQL = package.Executables.Add("STOCK:SQLTask") as TaskHost;
+            executeMergeSQL.Name = "Execute Merge Command";
+            executeMergeSQL.Properties["Connection"].SetValue(executeMergeSQL, destinationManager.ID);
+            executeMergeSQL.Properties["SqlStatementSource"].SetValue(executeMergeSQL, merge_sql_transwrap);
+            var executeMergeSQLTask = executeMergeSQL.InnerObject as ExecuteSQLTask;
+
+            // Add input parameter binding
+            executeMergeSQLTask.ParameterBindings.Add();
+            IDTSParameterBinding parameterBinding = executeMergeSQLTask.ParameterBindings.GetBinding(0);
+            parameterBinding.DtsVariableName = "CDC_State";
+            parameterBinding.ParameterDirection = ParameterDirections.Input;
+            parameterBinding.DataType = 16;
+            parameterBinding.ParameterName = "@cdcstate";
+            parameterBinding.ParameterSize = -1;
+
             // Configure precedence
-            (package.PrecedenceConstraints.Add((Executable)cdcControlTaskGetRange, (Executable)sequenceContainer)).Value = DTSExecResult.Success;
-            (package.PrecedenceConstraints.Add((Executable)sequenceContainer, (Executable)cdcControlTaskMarkRange)).Value = DTSExecResult.Success;
+            (package.PrecedenceConstraints.Add((Executable)cdcControlTaskGetRange, (Executable)executeMergeSQL)).Value = DTSExecResult.Success;
+            (package.PrecedenceConstraints.Add((Executable)executeMergeSQL, (Executable)cdcControlTaskMarkRange)).Value = DTSExecResult.Success;
 
             return package;
         }
@@ -239,6 +231,7 @@ namespace SQLServerCDCSync
                 var cdcconnstr = (new System.Data.SqlClient.SqlConnectionStringBuilder(destinationconn));
                 package.Name = "CDC Initial Load Package for " + cdcconnstr.InitialCatalog;
                 cdcconnstr.InitialCatalog = cdcdatabase;
+                cdcconnstr.ConnectTimeout = 300; // TODO: Add for other connections as well
                 cdcconn = cdcconnstr.ConnectionString;
                 cdcConnnection = new SqlConnection(cdcconn);
             }
@@ -247,6 +240,7 @@ namespace SQLServerCDCSync
                 var cdcconnstr = (new System.Data.OleDb.OleDbConnectionStringBuilder(destinationconn));
                 package.Name = "CDC Initial Load Package for " + cdcconnstr["Initial Catalog"];
                 cdcconnstr["InitialCatalog"] = cdcdatabase;
+                cdcconnstr["ConnectTimeout"] = 300;
                 cdcconn = cdcconnstr.ConnectionString;
                 cdcConnnection = new OleDbConnection(cdcconn);
             }
@@ -270,7 +264,12 @@ namespace SQLServerCDCSync
             cdcConnnection.Open();
             // Get CDC tables from database
             var cdctables = GetSQLTableList(cdcConnnection, "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1");
-                       
+
+            if (tables.Length == 0)
+            {
+                tables = cdctables.Keys.ToArray();
+            }
+
             // Add CDC State Table
             TaskHost createCDCStateTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
             createCDCStateTable.Name = "Create CDC state table if it does not exist";
@@ -339,12 +338,18 @@ namespace SQLServerCDCSync
                 resultBinding.ResultName = "0";
                 resultBinding.DtsVariableName = "User::Create" + table + "_Result";
 
+                // TODO: Implement support for tables without UNID
+                if (tinfo.CreatePrimaryKeySQL == null)
+                {
+                    throw new Exception("Table " + table + " does not have any unique keys");
+                }
+
                 // Create a index from the primary key
                 TaskHost createIndexes = package.Executables.Add("STOCK:SQLTask") as TaskHost;
                 createIndexes.Name = "Create indexes on destination table " + table ;
                 createIndexes.Properties["Connection"].SetValue(createIndexes, destinationManager.ID);
                 createIndexes.Properties["SqlStatementSource"].SetValue(createIndexes,
-                    tinfo.CreatePrimaryKeySQL // TODO: Move index creation to after table creation
+                    tinfo.CreatePrimaryKeySQL
                 );
 
                 // Add CDC Initial load start
@@ -402,7 +407,6 @@ namespace SQLServerCDCSync
                 adonetsrcinstance.SetComponentProperty("AccessMode", 0);
                 adonetsrcinstance.SetComponentProperty("TableOrViewName", table);
                 adonetsrcinstance.SetComponentProperty("CommandTimeout", 300);
-                //TODO: Also do connection timeout
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(sourceManager);
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManagerID = sourceManager.ID;
                 adonetsrcinstance.AcquireConnections(null);
