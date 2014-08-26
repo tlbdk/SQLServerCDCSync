@@ -10,6 +10,8 @@ using System.Globalization;
 using System.Data.SqlClient;
 using Attunity.SqlServer.CDCControlTask;
 using Microsoft.SqlServer.Dts.Tasks.ExecuteSQLTask;
+using System.Data.Common;
+using System.Data.OleDb;
 
 // Links : EzAPI
 // http://social.msdn.microsoft.com/Forums/sqlserver/en-US/eb8b10bc-963c-4d36-8ea2-6c3ebbc20411/copying-600-tables-in-ssis-how-to?forum=sqlintegrationservices
@@ -108,7 +110,7 @@ namespace SQLServerCDCSync
             var cdctables = GetSQLTableList(cdcConnnection, "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1");
 
             foreach (var table in tables)
-            {   
+            {
                 var tinfo = new SQLTableInfo(cdcConnnection, table);
 
                 if (tinfo.UniqueColums.Count == 0)
@@ -201,50 +203,72 @@ namespace SQLServerCDCSync
             Application app = new Application();
             Package package = new Package();
 
-            ConnectionManager sourceManager;
-            ConnectionManager destinationManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
-            destinationManager.ConnectionString = destinationconn;
-            destinationManager.Name = "Destination Connection";
+            // Resolve Assembly Name or CreationName
+            string destinationprovider;
+            string cdcconn;
+            switch (sourceprovider)
+            {
+                case "System.Data.SqlClient":
+                    sourceprovider = string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName);
+                    destinationprovider = string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName);
+                    break;
+                case "System.Data.OracleClient":
+                    #pragma warning disable 612, 618 // Disable the Obsolete warning for the OracleClient component
+                    sourceprovider = string.Format("ADO.NET:{0}", typeof(System.Data.OracleClient.OracleConnection).AssemblyQualifiedName);
+                    #pragma warning restore 612, 618
+                    destinationprovider = string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName);
+                    break;
+                case "Oracle.ManagedDataAccess.Client":
+                    sourceprovider = string.Format("ADO.NET:{0}", typeof(Oracle.ManagedDataAccess.Client.OracleConnection).AssemblyQualifiedName);
+                    destinationprovider = string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName);
+                    break;
+                case "OLEDB":
+                    sourceprovider = "OLEDB";
+                    destinationprovider = "OLEDB";
+                    break;
+                default:
+                    throw new Exception("Unknown source connection provider");
+            }
 
             // Build the CDC connection string
-            var cdcconn = (new System.Data.SqlClient.SqlConnectionStringBuilder(destinationconn));
-            package.Name = "CDC Initial Load Package for " + cdcconn.InitialCatalog;
-            cdcconn.InitialCatalog = cdcdatabase;
-            ConnectionManager cdcManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
-            cdcManager.ConnectionString = cdcconn.ConnectionString;
-            cdcManager.Name = "CDC database Connection";
-
-            // Get CDC tables from database
-            SqlConnection cdcConnnection = new SqlConnection(cdcconn.ConnectionString);
-            cdcConnnection.Open();
-            var cdctables = GetSQLTableList(cdcConnnection, "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1");
-            
-            // Source connection managers
-            if (sourceprovider == "System.Data.SqlClient")
-            {                
-                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(SqlConnection).AssemblyQualifiedName));
-                sourceManager.ConnectionString = sourceconn;
-            }
-            else if (sourceprovider == "System.Data.OracleClient")
+            DbConnection cdcConnnection;
+            if (destinationprovider.StartsWith("ADO.NET"))
             {
-
-                #pragma warning disable 612, 618 // Disable the Obsolete warning for the OracleClient component
-                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(System.Data.OracleClient.OracleConnection).AssemblyQualifiedName));
-                #pragma warning restore 612, 618
-                sourceManager.ConnectionString = sourceconn;
+                var cdcconnstr = (new System.Data.SqlClient.SqlConnectionStringBuilder(destinationconn));
+                package.Name = "CDC Initial Load Package for " + cdcconnstr.InitialCatalog;
+                cdcconnstr.InitialCatalog = cdcdatabase;
+                cdcconn = cdcconnstr.ConnectionString;
+                cdcConnnection = new SqlConnection(cdcconn);
             }
-            else if (sourceprovider == "Oracle.ManagedDataAccess.Client")
+            else if (destinationprovider == "OLEDB")
             {
-                sourceManager = package.Connections.Add(string.Format("ADO.NET:{0}", typeof(Oracle.ManagedDataAccess.Client.OracleConnection).AssemblyQualifiedName));
-                sourceManager.ConnectionString = sourceconn;
+                var cdcconnstr = (new System.Data.OleDb.OleDbConnectionStringBuilder(destinationconn));
+                package.Name = "CDC Initial Load Package for " + cdcconnstr["Initial Catalog"];
+                cdcconnstr["InitialCatalog"] = cdcdatabase;
+                cdcconn = cdcconnstr.ConnectionString;
+                cdcConnnection = new OleDbConnection(cdcconn);
             }
             else
             {
-                throw new Exception("Unknown connection provider");
+                throw new Exception("Unknown destination provider for CDC database");
             }
+    
+            ConnectionManager cdcManager = package.Connections.Add(destinationprovider);
+            cdcManager.ConnectionString = cdcconn;
+            cdcManager.Name = "CDC database Connection";
 
+            ConnectionManager sourceManager = package.Connections.Add(sourceprovider);
+            sourceManager.ConnectionString = sourceconn;
             sourceManager.Name = "Source Connection";
-           
+          
+            ConnectionManager destinationManager = package.Connections.Add(destinationprovider);
+            destinationManager.ConnectionString = destinationconn;
+            destinationManager.Name = "Destination Connection";
+
+            cdcConnnection.Open();
+            // Get CDC tables from database
+            var cdctables = GetSQLTableList(cdcConnnection, "WHERE s.name != 'cdc' and t.is_ms_shipped = 0 and t.is_tracked_by_cdc = 1");
+                       
             // Add CDC State Table
             TaskHost createCDCStateTable = package.Executables.Add("STOCK:SQLTask") as TaskHost;
             createCDCStateTable.Name = "Create CDC state table if it does not exist";
@@ -252,7 +276,7 @@ namespace SQLServerCDCSync
             createCDCStateTable.Properties["SqlStatementSource"].SetValue(createCDCStateTable,
                 "IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='cdc_states' and xtype='U') BEGIN\n" +
                     "CREATE TABLE [dbo].[cdc_states] ([name] [nvarchar](256) NOT NULL, [state] [nvarchar](256) NOT NULL) ON [PRIMARY];\n" +
-                    "CREATE UNIQUE NONCLUSTERED INDEX [cdc_states_name] ON [dbo].[cdc_states] ( [name] ASC ) WITH (PAD_INDEX  = OFF) ON [PRIMARY];\n" +
+                    "CREATE UNIQUE NONCLUSTERED INDEX [cdc_states_name] ON [dbo].[cdc_states] ( [name] ASC ) WITH (PAD_INDEX  = OFF) ON [PRIMARY];\n" + 
                 "END;"
             );
 
@@ -296,7 +320,7 @@ namespace SQLServerCDCSync
                 createDestinationTable.Properties["Connection"].SetValue(createDestinationTable, destinationManager.ID);
                 createDestinationTable.Properties["SqlStatementSource"].SetValue(createDestinationTable, 
                     String.Format("SELECT * INTO [dbo].{0} FROM [{1}].{2} WHERE 1 = 2;\n", table, cdcdatabase, cdctables[table]) +
-                    tinfo.CreatePrimaryKeySQL ?? ""
+                    tinfo.CreatePrimaryKeySQL ?? "" // TODO: Move index creation to after table creation
                 );
 
 				// TODO: Create a index from the primary key
@@ -351,6 +375,7 @@ namespace SQLServerCDCSync
                 adonetsrcinstance.SetComponentProperty("AccessMode", 0);
                 adonetsrcinstance.SetComponentProperty("TableOrViewName", table);
                 adonetsrcinstance.SetComponentProperty("CommandTimeout", 300);
+                //TODO: Also do connection timeout
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(sourceManager);
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManagerID = sourceManager.ID;
                 adonetsrcinstance.AcquireConnections(null);
@@ -443,14 +468,29 @@ namespace SQLServerCDCSync
             }
         }
 
-        private static Dictionary<String, String> GetSQLTableList(SqlConnection connnection, string whereclause = "")
+        private static Dictionary<String, String> GetSQLTableList(DbConnection connnection, string whereclause = "")
         {
             var tables = new Dictionary<String, String>();
-            SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand(
+            var sql = 
                 "SELECT s.name, t.name " +
                 "FROM sys.tables t INNER JOIN sys.schemas s ON (t.schema_id = s.schema_id) " +
-                whereclause, connnection);
-            using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
+                whereclause;
+
+            DbCommand sqlcmd;
+            if (connnection is SqlConnection)
+            {
+                sqlcmd = new System.Data.SqlClient.SqlCommand(sql, (SqlConnection)connnection);
+            }
+            else if (connnection is OleDbConnection)
+            {
+                sqlcmd = new System.Data.OleDb.OleDbCommand(sql, (OleDbConnection)connnection);
+            }
+            else
+            {
+                throw new Exception("Unknown connection type");
+            }
+
+            using (var sqlRd = sqlcmd.ExecuteReader())
             {
                 while (sqlRd.Read())
                 {
@@ -468,19 +508,33 @@ namespace SQLServerCDCSync
             public List<string> Colums = new List<string>();
             public bool IdentityColumsUsed = false;
 
-            public SQLTableInfo(SqlConnection connnection, string table)
+            public SQLTableInfo(DbConnection connnection, string table)
             {
                 // Get Colums from database
-                SqlCommand sqlcmd = new System.Data.SqlClient.SqlCommand(
+                string sql = 
                     "SELECT c.name, is_identity, ISNULL(i.is_unique, 0), ISNULL(i.is_primary_key, 0), ISNULL(ic.is_descending_key, 0)\n" +
                     "FROM sys.tables t\n" +
                     "LEFT JOIN sys.columns c ON (t.object_id = c.object_id)\n" +
                     "LEFT JOIN sys.index_columns ic ON (c.object_id = ic.object_id AND c.column_id = ic.column_id)\n" +
                     "LEFT JOIN sys.indexes i ON (i.object_id = ic.object_id AND i.index_id = ic.index_id)\n" +
                     "WHERE t.name = '" + table + "'\n" +
-                    "ORDER BY ic.index_id, ic.index_column_id",
-                connnection);
-                using (SqlDataReader sqlRd = sqlcmd.ExecuteReader())
+                    "ORDER BY ic.index_id, ic.index_column_id";
+
+                DbCommand sqlcmd;
+                if (connnection is SqlConnection)
+                {
+                    sqlcmd = new System.Data.SqlClient.SqlCommand(sql, (SqlConnection)connnection);
+                }
+                else if (connnection is OleDbConnection)
+                {
+                    sqlcmd = new System.Data.OleDb.OleDbCommand(sql, (OleDbConnection)connnection);
+                }
+                else
+                {
+                    throw new Exception("Unknown connection type");
+                }
+
+                using (var sqlRd = sqlcmd.ExecuteReader())
                 {
                     while (sqlRd.Read())
                     {
