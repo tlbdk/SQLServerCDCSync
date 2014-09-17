@@ -158,14 +158,17 @@ namespace SQLServerCDCSync
                     "INSERT INTO cdc_status ([name], [rowcount], [elapsed]) VALUES('" + table + "',@rowcount, DATEDIFF(millisecond,@t1,GETDATE()))\n";                
             }
 
+            var error_msg = "CAST(ERROR_NUMBER() AS VARCHAR) + ',' + CAST(ERROR_SEVERITY() AS VARCHAR) + ',' + CAST(ERROR_STATE() AS VARCHAR) + ',' + CAST(ERROR_LINE() AS VARCHAR) + ': ' + ERROR_MESSAGE()";
             var merge_sql_transwrap =
                 "BEGIN TRY\n" +
-                "BEGIN TRANSACTION\n" +
-                    merge_sql +
-                    "COMMIT;\n" +
+                    "BEGIN TRANSACTION\n" +
+                        merge_sql +
+                    "COMMIT TRANSACTION\n" +
                 "END TRY\n" +
                 "BEGIN CATCH\n" +
                     "ROLLBACK;\n" +
+                    "INSERT INTO cdc_status ([name], [rowcount], [elapsed], [error]) VALUES('error', -1, 0, " + error_msg + "))\n" +
+                    "RaisError('Merge Error', 18, 1)\n" +
                 "END CATCH\n";
 
             // Add Execute Merge Command
