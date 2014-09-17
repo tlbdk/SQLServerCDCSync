@@ -26,7 +26,7 @@ namespace SQLServerCDCSync
             generator.SourceConnection = "";
             generator.SourceConnectionProvider = "System.Data.OracleClient";
             generator.DestinationConnection = "";
-            generator.CDCDatabase = "";
+            generator.CDCConnection = "";
             generator.Tables = new string[] { };
 
             generator.RefreshMetaData();

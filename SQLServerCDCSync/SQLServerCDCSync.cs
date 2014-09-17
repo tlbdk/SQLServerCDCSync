@@ -29,6 +29,26 @@ namespace SQLServerCDCSync
 {
     class SQLServerCDCSync
     {
+        public String SourceConnection;
+        public String SourceConnectionProvider;
+        public String DestinationConnection;
+        public String CDCConnection;
+        public String[] Tables;
+
+        public SQLServerCDCSync()
+        {
+
+        }
+
+        public SQLServerCDCSync(string sourceconn, string sourceprovider, string destinationconn, string cdcconn, string[] tables)
+        {
+            this.SourceConnection = sourceconn;
+            this.SourceConnectionProvider = sourceprovider;
+            this.DestinationConnection = destinationconn;
+            this.CDCConnection = cdcconn;
+            this.Tables = tables;
+        }
+
         public static void InitializeEnvironment()
         {
             // Make sure Oracle PATH and environment variables are set else OracleClient won't work
@@ -690,3 +710,4 @@ namespace SQLServerCDCSync
         }
     }
 }
+
