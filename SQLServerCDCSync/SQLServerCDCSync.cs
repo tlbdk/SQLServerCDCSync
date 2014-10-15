@@ -262,11 +262,14 @@ namespace SQLServerCDCSync
                 }
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(sourceManager);
                 adonetsrc.RuntimeConnectionCollection[0].ConnectionManagerID = sourceManager.ID;
+                //return package;
                 adonetsrcinstance.AcquireConnections(null);
                 adonetsrcinstance.ReinitializeMetaData();
                 adonetsrcinstance.ReleaseConnections();
-
-                //return package;
+               
+                //FIXME: Error out
+                // http://www.codeproject.com/Articles/18853/Digging-SSIS-object-model
+                // http://msdn.microsoft.com/en-us/library/ms136009.aspx
 
                 // Configure the destination
                 IDTSComponentMetaData100 adonetdst = dataFlowTaskPipe.ComponentMetaDataCollection.New();
@@ -306,6 +309,7 @@ namespace SQLServerCDCSync
                 // Attach the path from data flow source to destination
                 IDTSPath100 path = dataFlowTaskPipe.PathCollection.New();
                 path.AttachPathAndPropagateNotifications(adonetsrc.OutputCollection[0], adonetdst.InputCollection[0]);
+
 
                 // Do coloum mapping on the destination
                 IDTSInput100 destInput = adonetdst.InputCollection[0];
@@ -619,11 +623,16 @@ namespace SQLServerCDCSync
             {
                 provider = "OLEDB";
                 var connbuilder = (new System.Data.OleDb.OleDbConnectionStringBuilder(connstr));
-                connbuilder["Connect Timeout"] = 300;
-                connbuilder["General Timeout"] = 300;
-                if (initialcatalog != null)
+                if (connbuilder.Provider.StartsWith("SQLNCLI"))
                 {
-                    connbuilder["Initial Catalog"] = initialcatalog;
+                    connbuilder["Connect Timeout"] = 300;
+                    connbuilder["General Timeout"] = 300;
+
+                    if (initialcatalog != null)
+                    {
+                        connbuilder["Initial Catalog"] = initialcatalog;
+                    }
+
                 }
                 connstr = connbuilder.ConnectionString;
             }

@@ -12,6 +12,8 @@ use SQLServerCDCSync;
 
 EXEC sys.sp_cdc_enable_db;
 
+CREATE TABLE [dbo].[ErrorSample] ([StringValue] [nvarchar](255), [DateValue] [datetime2] NOT NULL);
+
 CREATE TABLE [dbo].[Test1](
     [Id] [int] IDENTITY(1,1) NOT NULL,
     [FirstName] [nvarchar](max) NOT NULL,
