@@ -266,11 +266,7 @@ namespace SQLServerCDCSync
                 adonetsrcinstance.AcquireConnections(null);
                 adonetsrcinstance.ReinitializeMetaData();
                 adonetsrcinstance.ReleaseConnections();
-               
-                //FIXME: Error out
-                // http://www.codeproject.com/Articles/18853/Digging-SSIS-object-model
-                // http://msdn.microsoft.com/en-us/library/ms136009.aspx
-
+              
                 // Configure the destination
                 IDTSComponentMetaData100 adonetdst = dataFlowTaskPipe.ComponentMetaDataCollection.New();
                 adonetdst.ValidateExternalMetadata = true;
@@ -310,6 +306,27 @@ namespace SQLServerCDCSync
                 IDTSPath100 path = dataFlowTaskPipe.PathCollection.New();
                 path.AttachPathAndPropagateNotifications(adonetsrc.OutputCollection[0], adonetdst.InputCollection[0]);
 
+
+                //FIXME: Error out
+                // http://www.codeproject.com/Articles/18853/Digging-SSIS-object-model
+                // http://msdn.microsoft.com/en-us/library/ms136009.aspx
+
+                // Create Error output
+                ConnectionManager errorfilesourceManager = package.Connections.Add("FLATFILE");
+                errorfilesourceManager.ConnectionString = @"C:\Temp\FlatFile.txt";
+                errorfilesourceManager.Name = "Error output for table source " + table;
+                errorfilesourceManager.Properties["Format"].SetValue(errorfilesourceManager, "Delimited");
+                errorfilesourceManager.Properties["ColumnNamesInFirstDataRow"].SetValue(errorfilesourceManager, true);
+                // Add Flat File destination
+                IDTSComponentMetaData100 adonetsrcerror = dataFlowTaskPipe.ComponentMetaDataCollection.New();
+                adonetsrcerror.Name = "Source Error File";
+                adonetsrcerror.ComponentClassID = app.PipelineComponentInfos["Flat File Destination"].CreationName;
+                IDTSDesigntimeComponent100 adonetsrcerrorinstance = adonetsrcerror.Instantiate();
+                adonetsrcerrorinstance.ProvideComponentProperties();
+                adonetsrcerror.RuntimeConnectionCollection[0].ConnectionManagerID = errorfilesourceManager.ID;
+                adonetsrcerror.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(errorfilesourceManager);
+
+                //TODO
 
                 // Do coloum mapping on the destination
                 IDTSInput100 destInput = adonetdst.InputCollection[0];

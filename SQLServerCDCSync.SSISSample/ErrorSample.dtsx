@@ -11,8 +11,8 @@
   DTS:LocaleID="1030"
   DTS:ObjectName="ErrorSample"
   DTS:PackageType="5"
-  DTS:VersionBuild="14"
-  DTS:VersionGUID="{C3890EFC-EE4D-4374-9B47-BAE7F39B0BFB}">
+  DTS:VersionBuild="15"
+  DTS:VersionGUID="{1FF41D6C-2CED-4DB1-98DF-94D4098A267B}">
   <DTS:Property
     DTS:Name="PackageFormatVersion">8</DTS:Property>
   <DTS:ConnectionManagers>
@@ -157,12 +157,7 @@
       DTS:ObjectName="Test Connection">
       <DTS:ObjectData>
         <DTS:ConnectionManager
-          DTS:ConnectionString="Data Source=DAMCOCPH-BI01.hdo.apmoller.net;User ID=sa;Initial Catalog=KFFSPRD_TEST;Provider=SQLNCLI11.1;Persist Security Info=True;Auto Translate=False;">
-          <DTS:Password
-            DTS:Name="Password"
-            Sensitive="1"
-            Encrypted="1">AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAj3oJd4Fj60mZYDjOCC9+rAAAAAAIAAAARABUAFMAAAADZgAAwAAAABAAAACeiBwqRLoYFp3JTHDc5b0GAAAAAASAAACgAAAAEAAAAJx3c/Papd0kGQdK6hlG+u4YAAAAlxllwWr69e5PpRyzBy5Urtc4VHT9bIXTFAAAALcyFvp7kJEV3hA5ut7xCbtxePaU</DTS:Password>
-        </DTS:ConnectionManager>
+          DTS:ConnectionString="Data Source=DAMCOCPH-BI01.hdo.apmoller.net;User ID=sa;Initial Catalog=KFFSPRD_TEST;Provider=SQLNCLI11.1;Persist Security Info=True;Auto Translate=False;" />
       </DTS:ObjectData>
     </DTS:ConnectionManager>
   </DTS:ConnectionManagers>
@@ -183,12 +178,12 @@
           version="1">
           <components>
             <component
-              refId="Package\Data Flow Task\Flat File Destination"
+              refId="Package\Data Flow Task\Error File Destination 1"
               componentClassID="Microsoft.FlatFileDestination"
               contactInfo="Flat File Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;0"
               description="Flat File Destination"
               localeId="1030"
-              name="Flat File Destination">
+              name="Error File Destination 1">
               <properties>
                 <property
                   dataType="System.Boolean"
@@ -202,50 +197,50 @@
               </properties>
               <connections>
                 <connection
-                  refId="Package\Data Flow Task\Flat File Destination.Connections[FlatFileConnection]"
+                  refId="Package\Data Flow Task\Error File Destination 1.Connections[FlatFileConnection]"
                   connectionManagerID="Package.ConnectionManagers[Error file]"
                   connectionManagerRefId="Package.ConnectionManagers[Error file]"
                   name="FlatFileConnection" />
               </connections>
               <inputs>
                 <input
-                  refId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input]"
+                  refId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input]"
                   hasSideEffects="true"
                   name="Flat File Destination Input">
                   <inputColumns>
                     <inputColumn
-                      refId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input].Columns[Flat File Source Error Output Column]"
+                      refId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input].Columns[Flat File Source Error Output Column]"
                       cachedCodepage="65001"
                       cachedDataType="text"
                       cachedName="Flat File Source Error Output Column"
-                      externalMetadataColumnId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input].ExternalColumns[Flat File Source Error Output Column]"
+                      externalMetadataColumnId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[Flat File Source Error Output Column]"
                       lineageId="Package\Data Flow Task\Flat File Source.Outputs[Flat File Source Error Output].Columns[Flat File Source Error Output Column]" />
                     <inputColumn
-                      refId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input].Columns[ErrorCode]"
+                      refId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input].Columns[ErrorCode]"
                       cachedDataType="i4"
                       cachedName="ErrorCode"
-                      externalMetadataColumnId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input].ExternalColumns[ErrorCode]"
+                      externalMetadataColumnId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[ErrorCode]"
                       lineageId="Package\Data Flow Task\Flat File Source.Outputs[Flat File Source Error Output].Columns[ErrorCode]" />
                     <inputColumn
-                      refId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input].Columns[ErrorColumn]"
+                      refId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input].Columns[ErrorColumn]"
                       cachedDataType="i4"
                       cachedName="ErrorColumn"
-                      externalMetadataColumnId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input].ExternalColumns[ErrorColumn]"
+                      externalMetadataColumnId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[ErrorColumn]"
                       lineageId="Package\Data Flow Task\Flat File Source.Outputs[Flat File Source Error Output].Columns[ErrorColumn]" />
                   </inputColumns>
                   <externalMetadataColumns
                     isUsed="True">
                     <externalMetadataColumn
-                      refId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input].ExternalColumns[Flat File Source Error Output Column]"
+                      refId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[Flat File Source Error Output Column]"
                       codePage="65001"
                       dataType="text"
                       name="Flat File Source Error Output Column" />
                     <externalMetadataColumn
-                      refId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input].ExternalColumns[ErrorCode]"
+                      refId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[ErrorCode]"
                       dataType="i4"
                       name="ErrorCode" />
                     <externalMetadataColumn
-                      refId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input].ExternalColumns[ErrorColumn]"
+                      refId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[ErrorColumn]"
                       dataType="i4"
                       name="ErrorColumn" />
                   </externalMetadataColumns>
@@ -253,12 +248,12 @@
               </inputs>
             </component>
             <component
-              refId="Package\Data Flow Task\Flat File Destination 1"
+              refId="Package\Data Flow Task\Error File Destination 2"
               componentClassID="Microsoft.FlatFileDestination"
               contactInfo="Flat File Destination;Microsoft Corporation; Microsoft SQL Server; (C) Microsoft Corporation; All Rights Reserved; http://www.microsoft.com/sql/support;0"
               description="Flat File Destination"
               localeId="1030"
-              name="Flat File Destination 1">
+              name="Error File Destination 2">
               <properties>
                 <property
                   dataType="System.Boolean"
@@ -272,60 +267,60 @@
               </properties>
               <connections>
                 <connection
-                  refId="Package\Data Flow Task\Flat File Destination 1.Connections[FlatFileConnection]"
+                  refId="Package\Data Flow Task\Error File Destination 2.Connections[FlatFileConnection]"
                   connectionManagerID="Package.ConnectionManagers[Error File 2]"
                   connectionManagerRefId="Package.ConnectionManagers[Error File 2]"
                   name="FlatFileConnection" />
               </connections>
               <inputs>
                 <input
-                  refId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input]"
+                  refId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input]"
                   hasSideEffects="true"
                   name="Flat File Destination Input">
                   <inputColumns>
                     <inputColumn
-                      refId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].Columns[StringValue]"
+                      refId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].Columns[StringValue]"
                       cachedDataType="wstr"
                       cachedLength="50"
                       cachedName="StringValue"
-                      externalMetadataColumnId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[StringValue]"
+                      externalMetadataColumnId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].ExternalColumns[StringValue]"
                       lineageId="Package\Data Flow Task\Flat File Source.Outputs[Flat File Source Output].Columns[StringValue]" />
                     <inputColumn
-                      refId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].Columns[DateValue]"
+                      refId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].Columns[DateValue]"
                       cachedDataType="dbTimeStamp2"
                       cachedName="DateValue"
-                      externalMetadataColumnId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[DateValue]"
+                      externalMetadataColumnId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].ExternalColumns[DateValue]"
                       lineageId="Package\Data Flow Task\Flat File Source.Outputs[Flat File Source Output].Columns[DateValue]" />
                     <inputColumn
-                      refId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].Columns[ErrorCode]"
+                      refId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].Columns[ErrorCode]"
                       cachedDataType="i4"
                       cachedName="ErrorCode"
-                      externalMetadataColumnId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[ErrorCode]"
+                      externalMetadataColumnId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].ExternalColumns[ErrorCode]"
                       lineageId="Package\Data Flow Task\OLE DB Destination.Outputs[OLE DB Destination Error Output].Columns[ErrorCode]" />
                     <inputColumn
-                      refId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].Columns[ErrorColumn]"
+                      refId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].Columns[ErrorColumn]"
                       cachedDataType="i4"
                       cachedName="ErrorColumn"
-                      externalMetadataColumnId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[ErrorColumn]"
+                      externalMetadataColumnId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].ExternalColumns[ErrorColumn]"
                       lineageId="Package\Data Flow Task\OLE DB Destination.Outputs[OLE DB Destination Error Output].Columns[ErrorColumn]" />
                   </inputColumns>
                   <externalMetadataColumns
                     isUsed="True">
                     <externalMetadataColumn
-                      refId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[StringValue]"
+                      refId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].ExternalColumns[StringValue]"
                       dataType="wstr"
                       length="50"
                       name="StringValue" />
                     <externalMetadataColumn
-                      refId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[DateValue]"
+                      refId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].ExternalColumns[DateValue]"
                       dataType="dbTimeStamp2"
                       name="DateValue" />
                     <externalMetadataColumn
-                      refId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[ErrorCode]"
+                      refId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].ExternalColumns[ErrorCode]"
                       dataType="i4"
                       name="ErrorCode" />
                     <externalMetadataColumn
-                      refId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input].ExternalColumns[ErrorColumn]"
+                      refId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input].ExternalColumns[ErrorColumn]"
                       dataType="i4"
                       name="ErrorColumn" />
                   </externalMetadataColumns>
@@ -577,7 +572,7 @@
           <paths>
             <path
               refId="Package\Data Flow Task.Paths[Flat File Source Error Output]"
-              endId="Package\Data Flow Task\Flat File Destination.Inputs[Flat File Destination Input]"
+              endId="Package\Data Flow Task\Error File Destination 1.Inputs[Flat File Destination Input]"
               name="Flat File Source Error Output"
               startId="Package\Data Flow Task\Flat File Source.Outputs[Flat File Source Error Output]" />
             <path
@@ -587,7 +582,7 @@
               startId="Package\Data Flow Task\Flat File Source.Outputs[Flat File Source Output]" />
             <path
               refId="Package\Data Flow Task.Paths[OLE DB Destination Error Output]"
-              endId="Package\Data Flow Task\Flat File Destination 1.Inputs[Flat File Destination Input]"
+              endId="Package\Data Flow Task\Error File Destination 2.Inputs[Flat File Destination Input]"
               name="OLE DB Destination Error Output"
               startId="Package\Data Flow Task\OLE DB Destination.Outputs[OLE DB Destination Error Output]" />
           </paths>
@@ -620,79 +615,21 @@
       <GraphLayout
         Capacity="8" xmlns="clr-namespace:Microsoft.SqlServer.IntegrationServices.Designer.Model.Serialization;assembly=Microsoft.SqlServer.IntegrationServices.Graph" xmlns:mssgle="clr-namespace:Microsoft.SqlServer.Graph.LayoutEngine;assembly=Microsoft.SqlServer.Graph" xmlns:assembly="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:mssgm="clr-namespace:Microsoft.SqlServer.Graph.Model;assembly=Microsoft.SqlServer.Graph">
         <NodeLayout
+          Size="187,42"
+          Id="Package\Data Flow Task\Error File Destination 2"
+          TopLeft="460,246" />
+        <NodeLayout
           Size="153,42"
           Id="Package\Data Flow Task\Flat File Source"
           TopLeft="255,80" />
         <NodeLayout
+          Size="187,42"
+          Id="Package\Data Flow Task\Error File Destination 1"
+          TopLeft="463,137" />
+        <NodeLayout
           Size="173,42"
           Id="Package\Data Flow Task\OLE DB Destination"
           TopLeft="241,199" />
-        <EdgeLayout
-          Id="Package\Data Flow Task.Paths[Flat File Source Output]"
-          TopLeft="329.5,122">
-          <EdgeLayout.Curve>
-            <mssgle:Curve
-              StartConnector="{assembly:Null}"
-              EndConnector="0,77"
-              Start="0,0"
-              End="0,69.5">
-              <mssgle:Curve.Segments>
-                <mssgle:SegmentCollection
-                  Capacity="5">
-                  <mssgle:LineSegment
-                    End="0,69.5" />
-                </mssgle:SegmentCollection>
-              </mssgle:Curve.Segments>
-            </mssgle:Curve>
-          </EdgeLayout.Curve>
-          <EdgeLayout.Labels>
-            <EdgeLabelCollection />
-          </EdgeLayout.Labels>
-        </EdgeLayout>
-        <NodeLayout
-          Size="174,42"
-          Id="Package\Data Flow Task\Flat File Destination"
-          TopLeft="463,137" />
-        <EdgeLayout
-          Id="Package\Data Flow Task.Paths[Flat File Source Error Output]"
-          TopLeft="408,101">
-          <EdgeLayout.Curve>
-            <mssgle:Curve
-              StartConnector="{assembly:Null}"
-              EndConnector="55,57"
-              Start="0,0"
-              End="47.5,57">
-              <mssgle:Curve.Segments>
-                <mssgle:SegmentCollection
-                  Capacity="5">
-                  <mssgle:LineSegment
-                    End="23.5,0" />
-                  <mssgle:CubicBezierSegment
-                    Point1="23.5,0"
-                    Point2="27.5,0"
-                    Point3="27.5,4" />
-                  <mssgle:LineSegment
-                    End="27.5,53" />
-                  <mssgle:CubicBezierSegment
-                    Point1="27.5,53"
-                    Point2="27.5,57"
-                    Point3="31.5,57" />
-                  <mssgle:LineSegment
-                    End="47.5,57" />
-                </mssgle:SegmentCollection>
-              </mssgle:Curve.Segments>
-            </mssgle:Curve>
-          </EdgeLayout.Curve>
-          <EdgeLayout.Labels>
-            <mssgm:EdgeLabel
-              BoundingBox="-36.12638671875,-17.609375,127.2527734375,11.609375"
-              RelativePosition="Any" />
-          </EdgeLayout.Labels>
-        </EdgeLayout>
-        <NodeLayout
-          Size="183,42"
-          Id="Package\Data Flow Task\Flat File Destination 1"
-          TopLeft="460,246" />
         <EdgeLayout
           Id="Package\Data Flow Task.Paths[OLE DB Destination Error Output]"
           TopLeft="414,220">
@@ -726,6 +663,64 @@
           <EdgeLayout.Labels>
             <mssgm:EdgeLabel
               BoundingBox="-50.20890625,-17.43359375,146.4178125,11.43359375"
+              RelativePosition="Any" />
+          </EdgeLayout.Labels>
+        </EdgeLayout>
+        <EdgeLayout
+          Id="Package\Data Flow Task.Paths[Flat File Source Output]"
+          TopLeft="329.5,122">
+          <EdgeLayout.Curve>
+            <mssgle:Curve
+              StartConnector="{assembly:Null}"
+              EndConnector="0,77"
+              Start="0,0"
+              End="0,69.5">
+              <mssgle:Curve.Segments>
+                <mssgle:SegmentCollection
+                  Capacity="5">
+                  <mssgle:LineSegment
+                    End="0,69.5" />
+                </mssgle:SegmentCollection>
+              </mssgle:Curve.Segments>
+            </mssgle:Curve>
+          </EdgeLayout.Curve>
+          <EdgeLayout.Labels>
+            <EdgeLabelCollection />
+          </EdgeLayout.Labels>
+        </EdgeLayout>
+        <EdgeLayout
+          Id="Package\Data Flow Task.Paths[Flat File Source Error Output]"
+          TopLeft="408,101">
+          <EdgeLayout.Curve>
+            <mssgle:Curve
+              StartConnector="{assembly:Null}"
+              EndConnector="55,57"
+              Start="0,0"
+              End="47.5,57">
+              <mssgle:Curve.Segments>
+                <mssgle:SegmentCollection
+                  Capacity="5">
+                  <mssgle:LineSegment
+                    End="23.5,0" />
+                  <mssgle:CubicBezierSegment
+                    Point1="23.5,0"
+                    Point2="27.5,0"
+                    Point3="27.5,4" />
+                  <mssgle:LineSegment
+                    End="27.5,53" />
+                  <mssgle:CubicBezierSegment
+                    Point1="27.5,53"
+                    Point2="27.5,57"
+                    Point3="31.5,57" />
+                  <mssgle:LineSegment
+                    End="47.5,57" />
+                </mssgle:SegmentCollection>
+              </mssgle:Curve.Segments>
+            </mssgle:Curve>
+          </EdgeLayout.Curve>
+          <EdgeLayout.Labels>
+            <mssgm:EdgeLabel
+              BoundingBox="-36.12638671875,-17.609375,127.2527734375,11.609375"
               RelativePosition="Any" />
           </EdgeLayout.Labels>
         </EdgeLayout>
