@@ -13,6 +13,8 @@ using Microsoft.SqlServer.Dts.Tasks.ExecuteSQLTask;
 using System.Data.Common;
 using System.Data.OleDb;
 using System.Configuration;
+using System.IO;
+using System.Reflection;
 
 // Links : EzAPI
 // http://social.msdn.microsoft.com/Forums/sqlserver/en-US/eb8b10bc-963c-4d36-8ea2-6c3ebbc20411/copying-600-tables-in-ssis-how-to?forum=sqlintegrationservices
@@ -39,7 +41,10 @@ namespace SQLServerCDCSync
         public String DestinationConnectionProvider;
         public String CDCDatabaseConnection;
         public String CDCStateConnection;
+        public String ErrorLogPath;
         public String[] Tables;
+
+        private String DestinationDatabaseName;
 
         public SQLServerCDCSync()
         {
@@ -59,6 +64,7 @@ namespace SQLServerCDCSync
             this.CDCDatabaseConnection = cdcdbconn;
             this.CDCStateConnection = cdcstateconn;
             this.Tables = tables;
+            this.ErrorLogPath = Path.GetFullPath(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location));
 
             // TODO: Verify that the CDCDatabaseConnection and the DestinationConnection is on the same server
             // TODO: Verify that source and destination provider is of same type
@@ -82,13 +88,22 @@ namespace SQLServerCDCSync
                     Environment.SetEnvironmentVariable("PATH", path + ";" + oraclehome, EnvironmentVariableTarget.Process);
                 }
             }
+
+
+            // Get name of destination database // TODO: Port this to using the OLEDB or SQL destination connection instead
+            var destinationConnnection = new SqlConnection(this.CDCStateConnection);
+            destinationConnnection.Open();
+            this.DestinationDatabaseName = GetSQLString(destinationConnnection, "SELECT db_name()");
+            destinationConnnection.Close();
+
         }
 
         public Package GenerateInitialLoadSSISPackage()
         {
             Application app = new Application();
             Package package = new Package();
-    
+            package.Name = "CDC Initial Load Package for " + this.DestinationDatabaseName;
+
             // Create connection managers and add them to the package
             var cdcConnManager = CreateConnectionManager(package, "ADO.NET CDC Database Connection", this.CDCDatabaseConnection, "System.Data.SqlClient");
             var cdcStateManager = CreateConnectionManager(package, "ADO.NET CDC State", this.CDCStateConnection, "System.Data.SqlClient");
@@ -159,6 +174,7 @@ namespace SQLServerCDCSync
 
             foreach (var table in this.Tables)
             {
+                Console.WriteLine("Generating initial load for table " + table);
                 var tinfo = new SQLTableInfo(cdcConnnection, table);
 
                 // Add variables
@@ -306,29 +322,7 @@ namespace SQLServerCDCSync
                 IDTSPath100 path = dataFlowTaskPipe.PathCollection.New();
                 path.AttachPathAndPropagateNotifications(adonetsrc.OutputCollection[0], adonetdst.InputCollection[0]);
 
-
-                //FIXME: Error out
-                // http://www.codeproject.com/Articles/18853/Digging-SSIS-object-model
-                // http://msdn.microsoft.com/en-us/library/ms136009.aspx
-
-                // Create Error output
-                ConnectionManager errorfilesourceManager = package.Connections.Add("FLATFILE");
-                errorfilesourceManager.ConnectionString = @"C:\Temp\FlatFile.txt";
-                errorfilesourceManager.Name = "Error output for table source " + table;
-                errorfilesourceManager.Properties["Format"].SetValue(errorfilesourceManager, "Delimited");
-                errorfilesourceManager.Properties["ColumnNamesInFirstDataRow"].SetValue(errorfilesourceManager, true);
-                // Add Flat File destination
-                IDTSComponentMetaData100 adonetsrcerror = dataFlowTaskPipe.ComponentMetaDataCollection.New();
-                adonetsrcerror.Name = "Source Error File";
-                adonetsrcerror.ComponentClassID = app.PipelineComponentInfos["Flat File Destination"].CreationName;
-                IDTSDesigntimeComponent100 adonetsrcerrorinstance = adonetsrcerror.Instantiate();
-                adonetsrcerrorinstance.ProvideComponentProperties();
-                adonetsrcerror.RuntimeConnectionCollection[0].ConnectionManagerID = errorfilesourceManager.ID;
-                adonetsrcerror.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(errorfilesourceManager);
-
-                //TODO
-
-                // Do coloum mapping on the destination
+                // Do column mapping on the destination
                 IDTSInput100 destInput = adonetdst.InputCollection[0];
                 IDTSExternalMetadataColumnCollection100 externalColumnCollection = destInput.ExternalMetadataColumnCollection;
                 IDTSVirtualInput100 destVirInput = destInput.GetVirtualInput();
@@ -340,8 +334,19 @@ namespace SQLServerCDCSync
                 foreach (IDTSOutputColumn100 outputCol in sourceColumns)
                 {
                     // Ignore all errors
-                    outputCol.ErrorRowDisposition = DTSRowDisposition.RD_IgnoreFailure;
-                    outputCol.TruncationRowDisposition = DTSRowDisposition.RD_IgnoreFailure;
+                    outputCol.ErrorRowDisposition = DTSRowDisposition.RD_RedirectRow;
+                    outputCol.TruncationRowDisposition = DTSRowDisposition.RD_RedirectRow;
+
+                    // Build list for debugging, TODO: Move this some code before where we check that colums are as they should be
+                    var destExtColsNames = new HashSet<String>();
+                    foreach(IDTSExternalMetadataColumn100 test in destExtCols) {
+                        destExtColsNames.Add(test.Name);
+                    }
+
+                    if (!destExtColsNames.Contains(outputCol.Name))
+                    {
+                        throw new Exception("Table " + table + " has new colum" + outputCol.Name);
+                    }
 
                     // Get the external column id
                     IDTSExternalMetadataColumn100 extCol = (IDTSExternalMetadataColumn100)destExtCols[outputCol.Name];
@@ -370,6 +375,199 @@ namespace SQLServerCDCSync
                     adonetdstinstance.SetComponentProperty("OpenRowset", table);
                 }
 
+
+
+                //FIXME: Error out
+                // http://www.codeproject.com/Articles/18853/Digging-SSIS-object-model
+                // http://msdn.microsoft.com/en-us/library/ms136009.aspx
+
+                //
+                // Create Error output for source
+                // 
+                ConnectionManager errorfilesourceManager = package.Connections.Add("FLATFILE");
+                errorfilesourceManager.ConnectionString =  Path.Combine(this.ErrorLogPath, "source-errors-" + table + ".txt");
+                errorfilesourceManager.Name = "Error output for source table " + table;
+                errorfilesourceManager.Properties["Format"].SetValue(errorfilesourceManager, "Delimited");
+                errorfilesourceManager.Properties["CodePage"].SetValue(errorfilesourceManager, "65001");
+                errorfilesourceManager.Properties["ColumnNamesInFirstDataRow"].SetValue(errorfilesourceManager, true);
+                var errorfilesourceManagerInstance = errorfilesourceManager.InnerObject as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSConnectionManagerFlatFile100;
+
+                // Add Flat File destination
+                IDTSComponentMetaData100 adonetsrcerror = dataFlowTaskPipe.ComponentMetaDataCollection.New();
+                adonetsrcerror.Name = "Source Error File";
+                adonetsrcerror.ComponentClassID = app.PipelineComponentInfos["Flat File Destination"].CreationName;
+                IDTSDesigntimeComponent100 adonetsrcerrorinstance = adonetsrcerror.Instantiate();
+                adonetsrcerrorinstance.ProvideComponentProperties();
+                adonetsrcerror.RuntimeConnectionCollection[0].ConnectionManagerID = errorfilesourceManager.ID;
+                adonetsrcerror.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(errorfilesourceManager);
+
+                //TODO http://www.sqlis.com/sqlis/post/Creating-packages-in-code-OLE-DB-Source-to-Flat-File-File-Destination.aspx
+
+                // Create flat file connection columns to match adonetsrc error columns
+                IDTSOutputColumnCollection100 sourceErrorColumns = adonetsrc.OutputCollection[1].OutputColumnCollection;
+                int indexMax = sourceErrorColumns.Count - 1;
+                for (int index = 0; index <= indexMax; index++)
+                {
+                    // Get input column to replicate in flat file
+                    var errorColumn = sourceErrorColumns[index];
+
+                    // Add column to Flat File connection manager
+                    var flatFileColumn = errorfilesourceManagerInstance.Columns.Add() as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSConnectionManagerFlatFileColumn100;
+                    flatFileColumn.ColumnType = "Delimited";
+                    flatFileColumn.ColumnWidth = errorColumn.Length;
+                    flatFileColumn.DataPrecision = errorColumn.Precision;
+                    flatFileColumn.DataScale = errorColumn.Scale;
+                    flatFileColumn.DataType = errorColumn.DataType;
+                    var columnName = flatFileColumn as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSName100;
+                    columnName.Name = errorColumn.Name;
+
+                    if (index < indexMax)
+                    {
+                        flatFileColumn.ColumnDelimiter = ",";
+                    }    
+                    else
+                    {
+                        flatFileColumn.ColumnDelimiter = Environment.NewLine;
+                    }
+                }
+
+                // Reinitialize the metadata, generating external columns from flat file columns
+                adonetsrcerrorinstance.AcquireConnections(null);
+                adonetsrcerrorinstance.ReinitializeMetaData();
+                adonetsrcerrorinstance.ReleaseConnections();
+
+                // Attach the path from data flow source to destination
+                IDTSPath100 srcerrorpath = dataFlowTaskPipe.PathCollection.New();
+                srcerrorpath.AttachPathAndPropagateNotifications(adonetsrc.OutputCollection[1], adonetsrcerror.InputCollection[0]);
+
+                // Hook up the external columns and map the error colums
+                foreach (IDTSOutputColumn100 outputCol in sourceErrorColumns)
+                {
+                    // Get the external column id
+                    IDTSExternalMetadataColumn100 extCol = (IDTSExternalMetadataColumn100)adonetsrcerror.InputCollection[0].ExternalMetadataColumnCollection[outputCol.Name];
+                    if (extCol != null)
+                    {
+                        // Create an input column from an output col of previous component.
+                        adonetsrcerror.InputCollection[0].GetVirtualInput().SetUsageType(outputCol.ID, DTSUsageType.UT_READONLY);
+                        IDTSInputColumn100 inputCol = adonetsrcerror.InputCollection[0].InputColumnCollection.GetInputColumnByLineageID(outputCol.ID);
+                        if (inputCol != null)
+                        {
+                            // map the input column with an external metadata column
+                            adonetsrcerrorinstance.MapInputColumn(adonetsrcerror.InputCollection[0].ID, inputCol.ID, extCol.ID);
+                        }
+                    }
+                }
+
+                //
+                // Create Error output for destination
+                // 
+                ConnectionManager errorfiledestinationManager = package.Connections.Add("FLATFILE");
+                errorfiledestinationManager.ConnectionString = Path.Combine(this.ErrorLogPath, "destination-errors-" + table + ".txt");
+                errorfiledestinationManager.Name = "Error output for destination table " + table;
+                errorfiledestinationManager.Properties["Format"].SetValue(errorfiledestinationManager, "Delimited");
+                errorfiledestinationManager.Properties["CodePage"].SetValue(errorfiledestinationManager, "65001");
+                errorfiledestinationManager.Properties["ColumnNamesInFirstDataRow"].SetValue(errorfiledestinationManager, true);
+                var errorfiledestinationManagerInstance = errorfiledestinationManager.InnerObject as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSConnectionManagerFlatFile100;
+
+                // Add Flat File destination
+                IDTSComponentMetaData100 adonetdsterror = dataFlowTaskPipe.ComponentMetaDataCollection.New();
+                adonetdsterror.Name = "Destination Error File";
+                adonetdsterror.ComponentClassID = app.PipelineComponentInfos["Flat File Destination"].CreationName;
+                IDTSDesigntimeComponent100 adonetdsterrorinstance = adonetdsterror.Instantiate();
+                adonetdsterrorinstance.ProvideComponentProperties();
+                adonetdsterror.RuntimeConnectionCollection[0].ConnectionManagerID = errorfiledestinationManager.ID;
+                adonetdsterror.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(errorfiledestinationManager);
+
+                //TODO http://www.sqlis.com/sqlis/post/Creating-packages-in-code-OLE-DB-Source-to-Flat-File-File-Destination.aspx
+
+                // Add all the input colums as they don't exists for a destination for some reason
+                foreach (IDTSExternalMetadataColumn100 errorColumn in adonetdst.InputCollection[0].ExternalMetadataColumnCollection)
+                {
+                    // Add column to Flat File connection manager
+                    var flatFileColumn = errorfiledestinationManagerInstance.Columns.Add() as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSConnectionManagerFlatFileColumn100;
+                    flatFileColumn.ColumnType = "Delimited";
+                    flatFileColumn.ColumnWidth = errorColumn.Length;
+                    flatFileColumn.DataPrecision = errorColumn.Precision;
+                    flatFileColumn.DataScale = errorColumn.Scale;
+                    flatFileColumn.DataType = errorColumn.DataType;
+                    var columnName = flatFileColumn as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSName100;
+                    columnName.Name = errorColumn.Name;
+                    flatFileColumn.ColumnDelimiter = ",";
+                }
+
+                // Create flat file connection columns to match adonetsrc error columns
+                IDTSOutputColumnCollection100 destinationErrorColumns = adonetdst.OutputCollection[0].OutputColumnCollection;
+                indexMax = destinationErrorColumns.Count - 1;
+                for (int index = 0; index <= indexMax; index++)
+                {
+                    // Get input column to replicate in flat file
+                    var errorColumn = destinationErrorColumns[index];
+
+                    // Add column to Flat File connection manager
+                    var flatFileColumn = errorfiledestinationManagerInstance.Columns.Add() as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSConnectionManagerFlatFileColumn100;
+                    flatFileColumn.ColumnType = "Delimited";
+                    flatFileColumn.ColumnWidth = errorColumn.Length;
+                    flatFileColumn.DataPrecision = errorColumn.Precision;
+                    flatFileColumn.DataScale = errorColumn.Scale;
+                    flatFileColumn.DataType = errorColumn.DataType;
+                    var columnName = flatFileColumn as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSName100;
+                    columnName.Name = errorColumn.Name;
+
+                    if (index < indexMax)
+                    {
+                        flatFileColumn.ColumnDelimiter = ",";
+                    }
+                    else
+                    {
+                        flatFileColumn.ColumnDelimiter = Environment.NewLine;
+                    }
+                }
+
+                // Reinitialize the metadata, generating external columns from flat file columns
+                adonetdsterrorinstance.AcquireConnections(null);
+                adonetdsterrorinstance.ReinitializeMetaData();
+                adonetdsterrorinstance.ReleaseConnections();
+
+                // Attach the path from data flow source to destination
+                IDTSPath100 dsterrorpath = dataFlowTaskPipe.PathCollection.New();
+                dsterrorpath.AttachPathAndPropagateNotifications(adonetdst.OutputCollection[0], adonetdsterror.InputCollection[0]);
+
+                // Hook up the external columns and map the source colums to the error input
+                foreach (IDTSOutputColumn100 outputCol in sourceColumns)
+                {
+                    // Get the external column id
+                    IDTSExternalMetadataColumn100 extCol = (IDTSExternalMetadataColumn100)adonetdsterror.InputCollection[0].ExternalMetadataColumnCollection[outputCol.Name];
+                    if (extCol != null)
+                    {
+                        // Create an input column from an output col of previous component.
+                        adonetdsterror.InputCollection[0].GetVirtualInput().SetUsageType(outputCol.ID, DTSUsageType.UT_READONLY);
+                        IDTSInputColumn100 inputCol = adonetdsterror.InputCollection[0].InputColumnCollection.GetInputColumnByLineageID(outputCol.ID);
+                        if (inputCol != null)
+                        {
+                            // map the input column with an external metadata column
+                            adonetdsterrorinstance.MapInputColumn(adonetdsterror.InputCollection[0].ID, inputCol.ID, extCol.ID);
+                        }
+                    }
+                }
+
+                // Hook up the external columns and map the error colums to the error input
+                foreach (IDTSOutputColumn100 outputCol in destinationErrorColumns)
+                {
+                    // Get the external column id
+                    IDTSExternalMetadataColumn100 extCol = (IDTSExternalMetadataColumn100)adonetdsterror.InputCollection[0].ExternalMetadataColumnCollection[outputCol.Name];
+                    if (extCol != null)
+                    {
+                        // Create an input column from an output col of previous component.
+                        adonetdsterror.InputCollection[0].GetVirtualInput().SetUsageType(outputCol.ID, DTSUsageType.UT_READONLY);
+                        IDTSInputColumn100 inputCol = adonetdsterror.InputCollection[0].InputColumnCollection.GetInputColumnByLineageID(outputCol.ID);
+                        if (inputCol != null)
+                        {
+                            // map the input column with an external metadata column
+                            adonetdsterrorinstance.MapInputColumn(adonetdsterror.InputCollection[0].ID, inputCol.ID, extCol.ID);
+                        }
+                    }
+                }
+
                 // Configure precedence
                 (package.PrecedenceConstraints.Add((Executable)createCDCStateTable, (Executable)createDestinationTable)).Value = DTSExecResult.Success;
                 (package.PrecedenceConstraints.Add((Executable)createCDCMergeStatusTable, (Executable)createDestinationTable)).Value = DTSExecResult.Success;
@@ -384,9 +582,6 @@ namespace SQLServerCDCSync
                 (package.PrecedenceConstraints.Add((Executable)cdcMarkEndInitialLoad, (Executable)copyCDCState)).Value = DTSExecResult.Success;
             }
 
-            // Limit the package to max 20 tables
-            package.MaxConcurrentExecutables = 20;
-
             return package;
         }
 
@@ -394,6 +589,7 @@ namespace SQLServerCDCSync
         {
             Application app = new Application();
             Package package = new Package();
+            package.Name = "CDC Merge Load Package for " + this.DestinationDatabaseName;
 
             // Create connection managers and add them to the package
             var cdcConnManager = CreateConnectionManager(package, "ADO.NET CDC Database Connection", this.CDCDatabaseConnection, "System.Data.SqlClient");
@@ -407,10 +603,6 @@ namespace SQLServerCDCSync
             // Get the cdc Database name
             var cdcdatabase = GetSQLString(cdcConnnection, "SELECT db_name()");
 
-            // Get name of destination database
-            // FIXME:
-            //package.Name = "CDC Merge Load Package for " + destinationdatabase;
-            
             // Add variables
             package.Variables.Add("CDC_State", false, "User", "");
 
@@ -470,6 +662,7 @@ namespace SQLServerCDCSync
 
             foreach (var table in this.Tables)
             {
+                Console.WriteLine("Generating merge code for table " + table);
                 var tinfo = new SQLTableInfo(cdcConnnection, table);
 
                 if (tinfo.UniqueColums.Count == 0)

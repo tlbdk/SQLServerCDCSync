@@ -13,9 +13,7 @@ namespace SQLServerCDCSync
         {
             // http://www.codeproject.com/Articles/547311/ProgrammaticallyplusCreateplusandplusDeployplusSSI
             
-            //var pgkuploadconn = ConfigurationManager.ConnectionStrings["PackageUploadConnection"];
             string password = ConfigurationManager.AppSettings["Password"];
-
 
             var generator = new SQLServerCDCSync(
                 ConfigurationManager.ConnectionStrings["SourceConnection"], 
@@ -25,37 +23,23 @@ namespace SQLServerCDCSync
                 (ConfigurationManager.AppSettings["Tables"] ?? "").Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
             );
 
-            // Generate initial sync package
+            generator.ErrorLogPath = @"c:\logs";
+
+            // Generate initial sync and merge packages
             var initpackage = generator.GenerateInitialLoadSSISPackage();
             var mergepackage = generator.GenerateMergeLoadSSISPackage();
-            // Generate merge package
 
-            //var test = initpackage.Execute();
+            // Limit the package to max 4 tables;
+            initpackage.MaxConcurrentExecutables = 4;
 
             SQLServerCDCSync.SavePackageToXML(initpackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\InitialLoadTest1.dtsx", password);
-            SQLServerCDCSync.SavePackageToXML(mergepackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\MergeLoadTest1.dtsx", password); 
+            SQLServerCDCSync.SavePackageToXML(mergepackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\MergeLoadTest1.dtsx", password);
 
-            //var mergepackage = generator.GenerateMergeSSISPackage();
-
-
-            /* 
-            var initpackage = SQLServerCDCSync.GenerateInitialLoadSSISPackage(
-                sourceconn.ProviderName, sourceconn.ConnectionString, destinationconn.ConnectionString, cdcdatabase, tables
-            );
-            
-             
-            var mergepackage = SQLServerCDCSync.GenerateMergeLoadSSISPackage(
-                destinationconn.ProviderName, destinationconn.ConnectionString, cdcdatabase, tables
-            );
-
-            
-            
-            
-            if(pgkuploadconn != null)
+            if (ConfigurationManager.ConnectionStrings["PackageUploadConnection"] != null)
             {
-                SQLServerCDCSync.SavePackageToSQLServer(initpackage, pgkuploadconn.ConnectionString, true);
-                SQLServerCDCSync.SavePackageToSQLServer(mergepackage, pgkuploadconn.ConnectionString, true);
-            } */
+                SQLServerCDCSync.SavePackageToSQLServer(initpackage, ConfigurationManager.ConnectionStrings["PackageUploadConnection"].ConnectionString, true);
+                SQLServerCDCSync.SavePackageToSQLServer(mergepackage, ConfigurationManager.ConnectionStrings["PackageUploadConnection"].ConnectionString, true);
+            }
             
         }
     }
