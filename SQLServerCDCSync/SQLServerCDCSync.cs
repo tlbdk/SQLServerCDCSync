@@ -330,6 +330,9 @@ namespace SQLServerCDCSync
                 IDTSExternalMetadataColumnCollection100 destExtCols = destInput.ExternalMetadataColumnCollection;
                 IDTSOutputColumnCollection100 sourceColumns = adonetsrc.OutputCollection[0].OutputColumnCollection;
 
+                destInput.ErrorRowDisposition = DTSRowDisposition.RD_RedirectRow;
+                //destInput.TruncationRowDisposition = DTSRowDisposition.RD_RedirectRow; // Does not like an option in the GUI
+
                 // Hook up the external columns
                 foreach (IDTSOutputColumn100 outputCol in sourceColumns)
                 {
@@ -375,8 +378,6 @@ namespace SQLServerCDCSync
                     adonetdstinstance.SetComponentProperty("OpenRowset", table);
                 }
 
-
-
                 //FIXME: Error out
                 // http://www.codeproject.com/Articles/18853/Digging-SSIS-object-model
                 // http://msdn.microsoft.com/en-us/library/ms136009.aspx
@@ -388,7 +389,8 @@ namespace SQLServerCDCSync
                 errorfilesourceManager.ConnectionString =  Path.Combine(this.ErrorLogPath, "source-errors-" + table + ".txt");
                 errorfilesourceManager.Name = "Error output for source table " + table;
                 errorfilesourceManager.Properties["Format"].SetValue(errorfilesourceManager, "Delimited");
-                errorfilesourceManager.Properties["CodePage"].SetValue(errorfilesourceManager, "65001");
+                //errorfilesourceManager.Properties["CodePage"].SetValue(errorfilesourceManager, "65001");
+                errorfilesourceManager.Properties["Unicode"].SetValue(errorfilesourceManager, true);
                 errorfilesourceManager.Properties["ColumnNamesInFirstDataRow"].SetValue(errorfilesourceManager, true);
                 var errorfilesourceManagerInstance = errorfilesourceManager.InnerObject as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSConnectionManagerFlatFile100;
 
@@ -465,7 +467,8 @@ namespace SQLServerCDCSync
                 errorfiledestinationManager.ConnectionString = Path.Combine(this.ErrorLogPath, "destination-errors-" + table + ".txt");
                 errorfiledestinationManager.Name = "Error output for destination table " + table;
                 errorfiledestinationManager.Properties["Format"].SetValue(errorfiledestinationManager, "Delimited");
-                errorfiledestinationManager.Properties["CodePage"].SetValue(errorfiledestinationManager, "65001");
+                //errorfiledestinationManager.Properties["CodePage"].SetValue(errorfiledestinationManager, "65001");
+                errorfiledestinationManager.Properties["Unicode"].SetValue(errorfiledestinationManager, true);
                 errorfiledestinationManager.Properties["ColumnNamesInFirstDataRow"].SetValue(errorfiledestinationManager, true);
                 var errorfiledestinationManagerInstance = errorfiledestinationManager.InnerObject as Microsoft.SqlServer.Dts.Runtime.Wrapper.IDTSConnectionManagerFlatFile100;
 
