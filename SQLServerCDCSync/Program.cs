@@ -40,7 +40,10 @@ namespace SQLServerCDCSync
                 SQLServerCDCSync.SavePackageToSQLServer(initpackage, ConfigurationManager.ConnectionStrings["PackageUploadConnection"].ConnectionString, true);
                 SQLServerCDCSync.SavePackageToSQLServer(mergepackage, ConfigurationManager.ConnectionStrings["PackageUploadConnection"].ConnectionString, true);
             }
-            
+
+            if ( System.Diagnostics.Debugger.IsAttached ) {
+                Console.ReadKey();
+            }
         }
     }
 }

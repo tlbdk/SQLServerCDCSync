@@ -74,7 +74,9 @@
     <Compile Include="SQLServerCDCSync.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="App.dist.config" />
+    <None Include="App.dist.config">
+      <SubType>Designer</SubType>
+    </None>
     <None Include="App.config">
       <SubType>Designer</SubType>
     </None>

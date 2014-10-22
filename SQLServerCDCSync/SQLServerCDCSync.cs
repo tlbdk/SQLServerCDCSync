@@ -15,6 +15,7 @@ using System.Data.OleDb;
 using System.Configuration;
 using System.IO;
 using System.Reflection;
+using System.Diagnostics;
 
 // Links : EzAPI
 // http://social.msdn.microsoft.com/Forums/sqlserver/en-US/eb8b10bc-963c-4d36-8ea2-6c3ebbc20411/copying-600-tables-in-ssis-how-to?forum=sqlintegrationservices
@@ -334,8 +335,17 @@ namespace SQLServerCDCSync
                 //destInput.TruncationRowDisposition = DTSRowDisposition.RD_RedirectRow; // Does not like an option in the GUI
 
                 // Hook up the external columns
+                var removeColumns = new List<int>();
                 foreach (IDTSOutputColumn100 outputCol in sourceColumns)
-                {
+                {   
+                    // Remove database types we don't support: http://msdn.microsoft.com/en-us/library/dn175470.aspx
+                    if (tinfo.UnsupportedTypes.ContainsKey(outputCol.Name))
+                    {
+                        Console.WriteLine("This colum is not supported by Atunity Oracle CDC: " + outputCol.Name);
+                        removeColumns.Add(outputCol.ID);
+                        continue;
+                    }
+
                     // Ignore all errors
                     outputCol.ErrorRowDisposition = DTSRowDisposition.RD_RedirectRow;
                     outputCol.TruncationRowDisposition = DTSRowDisposition.RD_RedirectRow;
@@ -362,10 +372,15 @@ namespace SQLServerCDCSync
                         {
                             // map the input column with an external metadata column
                             adonetdstinstance.MapInputColumn(destInput.ID, inputCol.ID, extCol.ID);
+                            //Debug.WriteLine(inputCol.Name + ": " + inputCol.LineageID);
                         }
                     }
                 }
-
+                // Remove columns that are not supported
+                foreach (var id in removeColumns) {
+                    sourceColumns.RemoveObjectByID(id);
+                }
+                
                 // Point to the destination table
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(destinationManager);
                 adonetdst.RuntimeConnectionCollection[0].ConnectionManagerID = destinationManager.ID;
@@ -407,6 +422,7 @@ namespace SQLServerCDCSync
 
                 // Create flat file connection columns to match adonetsrc error columns
                 IDTSOutputColumnCollection100 sourceErrorColumns = adonetsrc.OutputCollection[1].OutputColumnCollection;
+
                 int indexMax = sourceErrorColumns.Count - 1;
                 for (int index = 0; index <= indexMax; index++)
                 {
@@ -443,8 +459,17 @@ namespace SQLServerCDCSync
                 srcerrorpath.AttachPathAndPropagateNotifications(adonetsrc.OutputCollection[1], adonetsrcerror.InputCollection[0]);
 
                 // Hook up the external columns and map the error colums
+                var removeErrorColumns = new List<int>();
                 foreach (IDTSOutputColumn100 outputCol in sourceErrorColumns)
                 {
+                    // Remove database types we don't support: http://msdn.microsoft.com/en-us/library/dn175470.aspx
+                    if (tinfo.UnsupportedTypes.ContainsKey(outputCol.Name))
+                    {
+                        removeErrorColumns.Add(outputCol.ID);
+                        continue;
+                    }
+
+
                     // Get the external column id
                     IDTSExternalMetadataColumn100 extCol = (IDTSExternalMetadataColumn100)adonetsrcerror.InputCollection[0].ExternalMetadataColumnCollection[outputCol.Name];
                     if (extCol != null)
@@ -458,6 +483,11 @@ namespace SQLServerCDCSync
                             adonetsrcerrorinstance.MapInputColumn(adonetsrcerror.InputCollection[0].ID, inputCol.ID, extCol.ID);
                         }
                     }
+                }
+                // Remove columns that are not supported
+                foreach (var id in removeErrorColumns)
+                {
+                    sourceErrorColumns.RemoveObjectByID(id);
                 }
 
                 //
@@ -910,15 +940,18 @@ namespace SQLServerCDCSync
             public HashSet<String> UniqueColums = new HashSet<String>();
             public String CreatePrimaryKeySQL = null;
             public List<string> Colums = new List<string>();
+            public Dictionary<string,string> UnsupportedTypes = new Dictionary<string,string>();
             public bool IdentityColumsUsed = false;
 
             public SQLTableInfo(DbConnection connnection, string table)
             {
                 // Get Colums from database
-                string sql = 
-                    "SELECT c.name, is_identity, ISNULL(i.is_unique, 0), ISNULL(i.is_primary_key, 0), ISNULL(ic.is_descending_key, 0)\n" +
+                string sql =
+                    "SELECT c.name AS column_name, is_identity, ISNULL(i.is_unique, 0) as is_unique, ISNULL(i.is_primary_key, 0) as is_primary_key, ISNULL(ic.is_descending_key, 0) AS is_descending_key\n" +
+                    ",ty.name, c.max_length\n" +
                     "FROM sys.tables t\n" +
                     "LEFT JOIN sys.columns c ON (t.object_id = c.object_id)\n" +
+                    "LEFT JOIN sys.types ty ON (c.user_type_id = ty.user_type_id)\n" +
                     "LEFT JOIN sys.index_columns ic ON (c.object_id = ic.object_id AND c.column_id = ic.column_id)\n" +
                     "LEFT JOIN sys.indexes i ON (i.object_id = ic.object_id AND i.index_id = ic.index_id)\n" +
                     "WHERE t.name = '" + table + "'\n" +
@@ -943,6 +976,10 @@ namespace SQLServerCDCSync
                     while (sqlRd.Read())
                     {
                         Colums.Add(sqlRd.GetString(0));
+                        if(sqlRd.GetString(5) == "varchar" && sqlRd.GetInt16(6) == -1) {
+                            UnsupportedTypes.Add(sqlRd.GetString(0), "varchar(max)");
+                        }
+                        
                         if (sqlRd.GetBoolean(1) || sqlRd.GetBoolean(2))
                         {
                             UniqueColums.Add(sqlRd.GetString(0));
