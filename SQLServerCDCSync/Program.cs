@@ -42,6 +42,7 @@ namespace SQLServerCDCSync
             }
 
             if ( System.Diagnostics.Debugger.IsAttached ) {
+                Console.WriteLine("Done");
                 Console.ReadKey();
             }
         }

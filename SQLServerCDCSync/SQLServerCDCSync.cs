@@ -757,7 +757,7 @@ namespace SQLServerCDCSync
             executeMergeSQL.Properties["Connection"].SetValue(executeMergeSQL, destinationManager.ID);
             executeMergeSQL.Properties["SqlStatementSource"].SetValue(executeMergeSQL, merge_sql_transwrap);
             var executeMergeSQLTask = executeMergeSQL.InnerObject as ExecuteSQLTask;
-            executeMergeSQLTask.TimeOut = 300;
+            executeMergeSQLTask.TimeOut = 30 * 60 ; // 30 minutes
 
             // Add input parameter binding
             executeMergeSQLTask.ParameterBindings.Add();
