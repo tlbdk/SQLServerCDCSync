@@ -677,6 +677,7 @@ namespace SQLServerCDCSync
                 "declare @cdcstart_lsn binary(10);\n" +
                 "declare @end_lsn binary(10);\n" +
                 "declare @start_lsn binary(10);\n" +
+                "declare @min_lsn binary(10);\n" +
                 "declare @tablecdcstate nvarchar(256);\n" +
                 "declare @rowcount int;\n" +
                 "declare @t1 datetime;\n" +
@@ -707,10 +708,15 @@ namespace SQLServerCDCSync
 
                 // Create the merge SQL statement
                 merge_sql +=
-                    // Get table specefic start_lsn if it has been set
+                    // Get table specefic start_lsn if it has been setx
                     "set @tablecdcstate = (SELECT state FROM cdc_states WHERE name = 'CDC_State_" + table + "');\n" +
                     "if @tablecdcstate IS NOT NULL AND @tablecdcstate LIKE 'ILEND%' BEGIN\n" +
                         "set @start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4, CHARINDEX('/', @tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4) - CHARINDEX('/IR',@tablecdcstate) - 4), 1));\n" +
+                    "END\n" +
+                    // Overwrite start with min if the initial sync has been started before any changes has been done to the table and min lsn is larger than the IL start 
+                    "set @min_lsn = " + cdcdatabase + ".sys.fn_cdc_get_min_lsn('" + ReplaceFirst(cdctables[table], "dbo.", "").Replace('.', '_') + "');\n" +
+                    "if @min_lsn > @start_lsn BEGIN\n" +
+                        "set @start_lsn = @min_lsn;\n" +
                     "END\n" +
                     // Create Merge statement
                     "set @rowcount = 0;\n" +
