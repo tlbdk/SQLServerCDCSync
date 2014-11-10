@@ -135,14 +135,11 @@ namespace SQLServerCDCSync
                 // Skip table if it's load_states
                 if (table == "load_states") continue;
 
-                // Disable FastLoadKeepNulls if a colum is non nullable, is unsupported and has a default value set
+                // Disable FastLoadKeepNulls if a colum is non nullable, is unsupported and has a default value set // TODO: Move this into AddDataFlow
                 var DisableFastLoadKeepNulls = tinfo.Colums.Any(x => !tinfo.NullableColums.Contains(x) && tinfo.UnsupportedTypes.ContainsKey(x) && tinfo.DefaultValueColums.ContainsKey(x));
 
                 Console.WriteLine("Generating initial load for table " + table);
                 TaskHost dataFlowTask = AddDataFlow(ssis.app, ssis.package, table, table, sourceManager, destinationManager, null, new HashSet<String>(tinfo.UnsupportedTypes.Keys), DisableFastLoadKeepNulls);
-
-                
-
 
                 // Configure precedence
                 ssis.AddConstraint(insertStart, dataFlowTask, DTSExecResult.Success);
@@ -160,6 +157,7 @@ namespace SQLServerCDCSync
             dataFlowTask.Name = "Copy source table "+ sourcetable + " to destination table " + destinationtable;
             dataFlowTask.DelayValidation = true;
             MainPipe dataFlowTaskPipe = (MainPipe)dataFlowTask.InnerObject;
+            // TODO Tweak these by finding the avg row size: "DB2: select avgrowsize from syscat.tables where tabschema = 'YOURSCHEMA' and tabname = 'YOURTABLE'"
             //dataFlowTaskPipe.DefaultBufferMaxRows = 1000;
             dataFlowTaskPipe.DefaultBufferSize *= 8;
 
