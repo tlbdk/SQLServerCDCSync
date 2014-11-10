@@ -25,20 +25,37 @@ namespace SQLServerCDCSync
 
             generator.ErrorLogPath = @"c:\logs";
 
-            // Generate initial sync and merge packages
-            var initpackage = generator.GenerateInitialLoadSSISPackage();
-            var mergepackage = generator.GenerateMergeLoadSSISPackage();
-
-            // Limit the package to max 4 tables;
-            initpackage.MaxConcurrentExecutables = 4;
-
-            SQLServerCDCSync.SavePackageToXML(initpackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\InitialLoadTest1.dtsx", password);
-            SQLServerCDCSync.SavePackageToXML(mergepackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\MergeLoadTest1.dtsx", password);
-
-            if (ConfigurationManager.ConnectionStrings["PackageUploadConnection"] != null)
+            // Generate initial load and merge packages if we have a CDC connection
+            if (ConfigurationManager.ConnectionStrings["CDCDatabaseConnection"] != null)
             {
-                SQLServerCDCSync.SavePackageToSQLServer(initpackage, ConfigurationManager.ConnectionStrings["PackageUploadConnection"].ConnectionString, true);
-                SQLServerCDCSync.SavePackageToSQLServer(mergepackage, ConfigurationManager.ConnectionStrings["PackageUploadConnection"].ConnectionString, true);
+                var initpackage = generator.GenerateInitialLoadSSISPackageCDC();
+                var mergepackage = generator.GenerateMergeLoadSSISPackageCDC();
+
+                // Limit the package to max 4 tables;
+                initpackage.MaxConcurrentExecutables = 4;
+
+                // Save local version of the packages
+                SQLServerCDCSync.SavePackageToXML(initpackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\InitialLoadTest1.dtsx", password);
+                SQLServerCDCSync.SavePackageToXML(mergepackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\MergeLoadTest1.dtsx", password);
+
+                // Upload packages to server
+                if (ConfigurationManager.ConnectionStrings["PackageUploadConnection"] != null)
+                {
+                    SQLServerCDCSync.SavePackageToSQLServer(initpackage, ConfigurationManager.ConnectionStrings["PackageUploadConnection"].ConnectionString, true);
+                    SQLServerCDCSync.SavePackageToSQLServer(mergepackage, ConfigurationManager.ConnectionStrings["PackageUploadConnection"].ConnectionString, true);
+                }
+            }
+            else
+            {
+                var initpackage = generator.GenerateInitialLoadSSISPackageSimple();
+                // Limit the package to max 4 tables;
+                initpackage.MaxConcurrentExecutables = 4;
+                SQLServerCDCSync.SavePackageToXML(initpackage, @"C:\repos\SQLServerCDCSync\SQLServerCDCSync.SSISSample\InitialLoadTest2.dtsx", password);
+
+                if (ConfigurationManager.ConnectionStrings["PackageUploadConnection"] != null)
+                {
+                    SQLServerCDCSync.SavePackageToSQLServer(initpackage, ConfigurationManager.ConnectionStrings["PackageUploadConnection"].ConnectionString, true);
+                }
             }
 
             if ( System.Diagnostics.Debugger.IsAttached ) {
