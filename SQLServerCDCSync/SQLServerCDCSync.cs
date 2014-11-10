@@ -154,7 +154,7 @@ namespace SQLServerCDCSync
         private TaskHost AddDataFlow(Application app, Package package, string sourcetable, string destinationtable, ConnectionManager sourceManager, ConnectionManager destinationManager, ConnectionManager fakeDestinationManager = null, HashSet<String> ignoreColums = null, bool disableFastLoadNulls = false)
         {
             TaskHost dataFlowTask = package.Executables.Add("STOCK:PipelineTask") as TaskHost;
-            dataFlowTask.Name = "Copy source table "+ sourcetable + " to destination table " + destinationtable;
+            dataFlowTask.Name = "Copy source table "+ sourcetable + " to destination";
             dataFlowTask.DelayValidation = true;
             MainPipe dataFlowTaskPipe = (MainPipe)dataFlowTask.InnerObject;
             // TODO Tweak these by finding the avg row size: "DB2: select avgrowsize from syscat.tables where tabschema = 'YOURSCHEMA' and tabname = 'YOURTABLE'"
