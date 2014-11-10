@@ -106,14 +106,13 @@ namespace SQLServerCDCSync
             var destinationManager = ssis.AddConnectionManager("Destination Connection", this.DestinationConnection, this.DestinationConnectionProvider);
 
             // Get table list if we have not defined it first
+            var destinationConnnection = CreateDBConnection(this.DestinationConnection, this.DestinationConnectionProvider);
+            destinationConnnection.Open();
             if (this.Tables.Length == 0)
             {
-                var destinationConnnection = CreateDBConnection(this.DestinationConnection, this.DestinationConnectionProvider);
-                destinationConnnection.Open();
                 this.Tables = GetSQLTableList(destinationConnnection, "WHERE s.name != 'cdc' and t.is_ms_shipped = 0").Keys.ToArray();
-                destinationConnnection.Close();
             }
-
+            
             // Add CDC State Table
             var createStateTable = ssis.AddSQLTask("Create load_states table", destinationManager,
                 "IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='load_states' and xtype='U') BEGIN\n" +
@@ -132,27 +131,37 @@ namespace SQLServerCDCSync
 
             foreach (var table in this.Tables)
             {
+                var tinfo = new SQLTableInfo(destinationConnnection, table);
                 // Skip table if it's load_states
                 if (table == "load_states") continue;
 
+                // Disable FastLoadKeepNulls if a colum is non nullable, is unsupported and has a default value set
+                var DisableFastLoadKeepNulls = tinfo.Colums.Any(x => !tinfo.NullableColums.Contains(x) && tinfo.UnsupportedTypes.ContainsKey(x) && tinfo.DefaultValueColums.ContainsKey(x));
+
                 Console.WriteLine("Generating initial load for table " + table);
-                TaskHost dataFlowTask = AddDataFlow(ssis.app, ssis.package, table, table, sourceManager, destinationManager, null, new HashSet<String>());
+                TaskHost dataFlowTask = AddDataFlow(ssis.app, ssis.package, table, table, sourceManager, destinationManager, null, new HashSet<String>(tinfo.UnsupportedTypes.Keys), DisableFastLoadKeepNulls);
+
+                
+
+
                 // Configure precedence
                 ssis.AddConstraint(insertStart, dataFlowTask, DTSExecResult.Success);
                 ssis.AddConstraint(dataFlowTask, updateEnd, DTSExecResult.Success);
             }
 
+            destinationConnnection.Close();
+
             return ssis.package;
         }
 
-        private TaskHost AddDataFlow(Application app, Package package, string sourcetable, string destinationtable, ConnectionManager sourceManager, ConnectionManager destinationManager, ConnectionManager fakeDestinationManager = null, HashSet<String> ignoreColums = null)
+        private TaskHost AddDataFlow(Application app, Package package, string sourcetable, string destinationtable, ConnectionManager sourceManager, ConnectionManager destinationManager, ConnectionManager fakeDestinationManager = null, HashSet<String> ignoreColums = null, bool disableFastLoadNulls = false)
         {
             TaskHost dataFlowTask = package.Executables.Add("STOCK:PipelineTask") as TaskHost;
             dataFlowTask.Name = "Copy source table "+ sourcetable + " to destination table " + destinationtable;
             dataFlowTask.DelayValidation = true;
             MainPipe dataFlowTaskPipe = (MainPipe)dataFlowTask.InnerObject;
             //dataFlowTaskPipe.DefaultBufferMaxRows = 1000;
-            dataFlowTaskPipe.DefaultBufferSize *= 10;
+            dataFlowTaskPipe.DefaultBufferSize *= 8;
 
             // Configure the source
             IDTSComponentMetaData100 adonetsrc = dataFlowTaskPipe.ComponentMetaDataCollection.New();
@@ -179,10 +188,10 @@ namespace SQLServerCDCSync
             {
                 adonetsrcinstance.SetComponentProperty("AccessMode", 0);
                 adonetsrcinstance.SetComponentProperty("OpenRowset", sourcetable);
+                //adonetsrcinstance.SetComponentProperty("FastLoadOptions", "ROWS_PER_BATCH = 10000");
             }
             adonetsrc.RuntimeConnectionCollection[0].ConnectionManager = DtsConvert.GetExtendedInterface(sourceManager);
             adonetsrc.RuntimeConnectionCollection[0].ConnectionManagerID = sourceManager.ID;
-            //return package;
             adonetsrcinstance.AcquireConnections(null);
             adonetsrcinstance.ReinitializeMetaData();
             adonetsrcinstance.ReleaseConnections();
@@ -209,7 +218,7 @@ namespace SQLServerCDCSync
             }
             else if (destinationManager.CreationName.StartsWith("OLEDB"))
             {
-                adonetdstinstance.SetComponentProperty("FastLoadKeepNulls", true);
+                adonetdstinstance.SetComponentProperty("FastLoadKeepNulls", disableFastLoadNulls ? false : true);
                 adonetdstinstance.SetComponentProperty("FastLoadKeepIdentity", true);
                 adonetdstinstance.SetComponentProperty("AccessMode", 3);
                 adonetdstinstance.SetComponentProperty("OpenRowset", destinationtable);
@@ -938,6 +947,8 @@ namespace SQLServerCDCSync
         private class SQLTableInfo
         {
             public HashSet<String> UniqueColums = new HashSet<String>();
+            public HashSet<String> NullableColums = new HashSet<String>();
+            public Dictionary<String, String> DefaultValueColums = new Dictionary<String, String>();
             public String CreatePrimaryKeySQL = null;
             public List<string> Colums = new List<string>();
             public Dictionary<string,string> UnsupportedTypes = new Dictionary<string,string>();
@@ -948,12 +959,13 @@ namespace SQLServerCDCSync
                 // Get Colums from database
                 string sql =
                     "SELECT c.name AS column_name, is_identity, ISNULL(i.is_unique, 0) as is_unique, ISNULL(i.is_primary_key, 0) as is_primary_key, ISNULL(ic.is_descending_key, 0) AS is_descending_key\n" +
-                    ",ty.name, c.max_length\n" +
+                    ",ty.name, c.max_length, d.name AS column_default_name, d.definition AS column_default_definition, ISNULL(c.is_nullable, 0) AS is_nullable\n" +
                     "FROM sys.tables t\n" +
                     "LEFT JOIN sys.columns c ON (t.object_id = c.object_id)\n" +
                     "LEFT JOIN sys.types ty ON (c.user_type_id = ty.user_type_id)\n" +
                     "LEFT JOIN sys.index_columns ic ON (c.object_id = ic.object_id AND c.column_id = ic.column_id)\n" +
                     "LEFT JOIN sys.indexes i ON (i.object_id = ic.object_id AND i.index_id = ic.index_id)\n" +
+                    "LEFT JOIN sys.default_constraints d on (c.default_object_id = d.object_id)\n" +
                     "WHERE t.name = '" + table + "'\n" +
                     "ORDER BY ic.index_id, ic.index_column_id";
 
@@ -998,6 +1010,16 @@ namespace SQLServerCDCSync
                             CreatePrimaryKeySQL += CreatePrimaryKeySQL == null 
                               ? "ALTER TABLE " + table + " ADD CONSTRAINT PK_" + table + " " + "PRIMARY KEY CLUSTERED (" + key 
                               : "," + key;
+                        }
+
+                        if (!sqlRd.IsDBNull(7))
+                        {
+                            DefaultValueColums.Add(sqlRd.GetString(0), sqlRd.GetString(8));
+                        }
+
+                        if (sqlRd.GetBoolean(9))
+                        {
+                            NullableColums.Add(sqlRd.GetString(0));
                         }
                     }
                 }
