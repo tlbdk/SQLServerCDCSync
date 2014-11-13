@@ -728,8 +728,8 @@ namespace SQLServerCDCSync
                 "declare @t1 datetime;\n" +
                 // Get the start lns and the lsn from the CDC mark operation(Get CDC Processing Range)
                 "set @cdcstart_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CS/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CS/', @cdcstate) + 4) - CHARINDEX('/CS/', @cdcstate) - 4), 1));\n" +
-                "set @end_lsn = CONVERT(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CE/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CE/', @cdcstate) + 4) - CHARINDEX('/CE/', @cdcstate) - 4), 1);\n" +
-                "set @start_lsn = @cdcstart_lsn;\n";
+                "set @end_lsn = CONVERT(binary(10), SUBSTRING(@cdcstate, CHARINDEX('/CE/', @cdcstate) + 4, CHARINDEX('/', @cdcstate, CHARINDEX('/CE/', @cdcstate) + 4) - CHARINDEX('/CE/', @cdcstate) - 4), 1);\n"
+            ;
 
             // Declare @cdcstate as when OLEDB is used ? is used instead of parameter names 
             if(destinationManager.CreationName.StartsWith("OLEDB")) {
@@ -753,7 +753,9 @@ namespace SQLServerCDCSync
 
                 // Create the merge SQL statement
                 merge_sql +=
-                    // Get table specefic start_lsn if it has been setx
+                    // Reset start LSN
+                    "set @start_lsn = @cdcstart_lsn;\n" +
+                    // Get table specific start_lsn if it has been set
                     "set @tablecdcstate = (SELECT state FROM cdc_states WHERE name = 'CDC_State_" + table + "');\n" +
                     "if @tablecdcstate IS NOT NULL AND @tablecdcstate LIKE 'ILEND%' BEGIN\n" +
                         "set @start_lsn = sys.fn_cdc_increment_lsn(CONVERT(binary(10), SUBSTRING(@tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4, CHARINDEX('/', @tablecdcstate, CHARINDEX('/IR/', @tablecdcstate) + 4) - CHARINDEX('/IR',@tablecdcstate) - 4), 1));\n" +
