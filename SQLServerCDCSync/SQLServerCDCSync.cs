@@ -715,7 +715,7 @@ namespace SQLServerCDCSync
                 this.Tables = cdctables.Keys.ToArray();
             }
 
-            // TODO: implement check so we don't fail if the initial load is not done yet, fx skip table
+            // TODO: implement check so we don't fail if the initial load is not done yet, fx skip tables not done, if ILUPDATE or TFSTART or TFREDO
             // CDC States: http://msdn.microsoft.com/en-us/library/hh758667.aspx
             var merge_sql =
                 "IF(@cdcstate IS NULL OR @cdcstate = '') BEGIN\n" +
@@ -751,7 +751,8 @@ namespace SQLServerCDCSync
                     throw new Exception("Could not find any unique colums on the table");
                 }
 
-                // CDC Debug : http://msdn.microsoft.com/en-us/library/hh758686.aspx                
+                // CDC Debug : http://msdn.microsoft.com/en-us/library/hh758686.aspx   
+                // TODO: Do per table skip as first TODO suggested, if ILEND
                 // Create the merge SQL statement
                 merge_sql +=
                     // Reset start LSN
