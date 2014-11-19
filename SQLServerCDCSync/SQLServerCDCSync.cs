@@ -276,7 +276,7 @@ namespace SQLServerCDCSync
 
                 if (!destExtColsNames.Contains(outputCol.Name))
                 {
-                    throw new Exception("Table " + sourcetable + " has new colum" + outputCol.Name);
+                    throw new Exception("Table " + sourcetable + " has new colum " + outputCol.Name);
                 }
 
                 // Get the external column id
@@ -1016,7 +1016,7 @@ namespace SQLServerCDCSync
 
                         if (!sqlRd.IsDBNull(7))
                         {
-                            DefaultValueColums.Add(sqlRd.GetString(0), sqlRd.GetString(8));
+                            DefaultValueColums[sqlRd.GetString(0)] = sqlRd.GetString(8);
                         }
 
                         if (sqlRd.GetBoolean(9))
