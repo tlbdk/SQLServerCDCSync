@@ -694,7 +694,9 @@ namespace SQLServerCDCSync
             cdcControlTaskGetRange.Properties["AutomaticStatePersistence"].SetValue(cdcControlTaskGetRange, true);
             cdcControlTaskGetRange.Properties["StateName"].SetValue(cdcControlTaskGetRange, "CDC_State");
             cdcControlTaskGetRange.Properties["StateTable"].SetValue(cdcControlTaskGetRange, "[dbo].[cdc_states]");
+            cdcControlTaskGetRange.Properties["CommandTimeout"].SetValue(cdcControlTaskGetRange, 300);
             cdcControlTaskGetRange.DelayValidation = true;
+            
 
             // Add Mark CDC Processed Range
             TaskHost cdcControlTaskMarkRange = ssis.package.Executables.Add("Attunity.CdcControlTask") as TaskHost;
@@ -706,6 +708,7 @@ namespace SQLServerCDCSync
             cdcControlTaskMarkRange.Properties["AutomaticStatePersistence"].SetValue(cdcControlTaskMarkRange, true);
             cdcControlTaskMarkRange.Properties["StateName"].SetValue(cdcControlTaskMarkRange, "CDC_State");
             cdcControlTaskMarkRange.Properties["StateTable"].SetValue(cdcControlTaskMarkRange, "[dbo].[cdc_states]");
+            cdcControlTaskGetRange.Properties["CommandTimeout"].SetValue(cdcControlTaskGetRange, 300);
             cdcControlTaskMarkRange.DelayValidation = true;
 
             // Get list of CDC tables
