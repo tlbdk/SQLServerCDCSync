@@ -853,7 +853,7 @@ namespace SQLServerCDCSync
             app.SaveToXml(filename, package, null);
         }
 
-        public static void SavePackageToSQLServer(Package package, string connectionString, bool overwrite = false)
+        public static void SavePackageToSQLServer(Package package, string location, string connectionString, bool overwrite = false)
         {
             var conn = (new System.Data.SqlClient.SqlConnectionStringBuilder(connectionString));
             Application app = new Application();
@@ -861,7 +861,7 @@ namespace SQLServerCDCSync
 
             if (!app.ExistsOnSqlServer(package.Name, conn.DataSource, conn.UserID, conn.Password) || overwrite)
             {
-                app.SaveToSqlServer(package, null, conn.DataSource, conn.UserID, conn.Password);
+                app.SaveToSqlServerAs(package, null, location, conn.DataSource, conn.UserID, conn.Password);
             }
         }
 
