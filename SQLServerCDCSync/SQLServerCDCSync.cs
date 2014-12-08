@@ -276,7 +276,7 @@ namespace SQLServerCDCSync
 
                 if (!destExtColsNames.Contains(outputCol.Name))
                 {
-                    throw new Exception("Table " + sourcetable + " has new colum " + outputCol.Name);
+                    throw new Exception("Source Table " + sourcetable + " has colum " + outputCol.Name + " that does not exists in destination table");
                 }
 
                 // Get the external column id
